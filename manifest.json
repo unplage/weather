@@ -2,7 +2,7 @@
   "name": "随行天气·精准预报",
   "short_name": "随行天气",
   "description": "实时天气、7日预报、灾害预警的优雅PWA",
-  "start_url": "/",
+  "start_url": "/weather/",
   "display": "standalone",
   "theme_color": "#1E88E5",
   "background_color": "#ffffff",
