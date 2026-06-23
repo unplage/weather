@@ -61,11 +61,6 @@
       font-weight: 600;
       letter-spacing: -0.3px;
     }
-    .city-name i {
-      font-size: 22px;
-      font-weight: 400;
-      color: #5b6e8c;
-    }
     .refresh-btn {
       background: white;
       border: none;
@@ -238,6 +233,93 @@
       font-weight: 500;
     }
 
+    /* ----- 新增：生活指数卡片 ----- */
+    .indices-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 12px;
+      margin-top: 6px;
+    }
+    .index-item {
+      background: #f8fafc;
+      border-radius: 16px;
+      padding: 12px 10px;
+      text-align: center;
+    }
+    .index-name {
+      font-size: 13px;
+      color: #6b7280;
+    }
+    .index-level {
+      font-weight: 600;
+      font-size: 16px;
+      margin-top: 4px;
+    }
+    .index-desc {
+      font-size: 12px;
+      color: #6b7280;
+      margin-top: 2px;
+    }
+
+    /* ----- 新增：天文卡片 ----- */
+    .astro-grid {
+      display: flex;
+      justify-content: space-around;
+      flex-wrap: wrap;
+      gap: 12px;
+    }
+    .astro-item {
+      text-align: center;
+      min-width: 60px;
+    }
+    .astro-icon {
+      font-size: 28px;
+      display: block;
+    }
+    .astro-label {
+      font-size: 12px;
+      color: #6b7280;
+      margin-top: 4px;
+    }
+    .astro-time {
+      font-weight: 600;
+      font-size: 16px;
+    }
+
+    /* ----- 新增：分钟降水卡片 ----- */
+    .minutely-container {
+      display: flex;
+      align-items: flex-end;
+      height: 80px;
+      gap: 4px;
+      padding-top: 12px;
+      overflow-x: auto;
+    }
+    .minute-bar {
+      flex: 0 0 12px;
+      background: #93c5fd;
+      border-radius: 4px 4px 0 0;
+      min-height: 4px;
+      transition: height 0.2s;
+      position: relative;
+    }
+    .minute-bar.has-rain {
+      background: #3b82f6;
+    }
+    .minute-bar-label {
+      font-size: 9px;
+      color: #9ca3af;
+      text-align: center;
+      margin-top: 2px;
+      flex: 0 0 12px;
+    }
+    .minutely-summary {
+      font-size: 14px;
+      color: #4b5563;
+      margin-top: 8px;
+      text-align: center;
+    }
+
     footer {
       text-align: center;
       font-size: 12px;
@@ -289,6 +371,16 @@
       background: #d1fae5;
       color: #065f46;
     }
+
+    .section-title {
+      font-weight: 600;
+      margin-bottom: 14px;
+      font-size: 18px;
+    }
+    .sub-text {
+      color: #6b7280;
+      font-size: 14px;
+    }
   </style>
 </head>
 <body>
@@ -335,7 +427,7 @@
 
   <!-- 逐小时预报 -->
   <div class="card">
-    <div style="font-weight: 600; margin-bottom: 14px;">⏱️ 逐小时天气</div>
+    <div class="section-title">⏱️ 逐小时天气</div>
     <div class="hourly-scroll" id="hourlyContainer">
       <div class="loading">加载中...</div>
     </div>
@@ -343,22 +435,40 @@
 
   <!-- 7日预报 -->
   <div class="card">
-    <div style="font-weight: 600; margin-bottom: 14px;">📅 未来7天</div>
+    <div class="section-title">📅 未来7天</div>
     <div class="daily-list" id="dailyContainer">
       <div class="loading">加载中...</div>
     </div>
   </div>
-  <footer>数据源: Open-Meteo · 空气质量/预警: 和风天气</footer>
+
+  <!-- 新增：生活指数 -->
+  <div class="card" id="indicesCard" style="display:none;">
+    <div class="section-title">🌟 生活指数</div>
+    <div class="indices-grid" id="indicesGrid"></div>
+  </div>
+
+  <!-- 新增：天文信息 -->
+  <div class="card" id="astroCard" style="display:none;">
+    <div class="section-title">🌙 天文信息</div>
+    <div class="astro-grid" id="astroGrid"></div>
+  </div>
+
+  <!-- 新增：分钟降水 -->
+  <div class="card" id="minutelyCard" style="display:none;">
+    <div class="section-title">🌧️ 分钟级降水预报</div>
+    <div class="minutely-container" id="minutelyContainer"></div>
+    <div class="minutely-summary" id="minutelySummary"></div>
+  </div>
+
+  <footer>数据源: Open-Meteo · 和风天气 (生活/天文/分钟降水)</footer>
 </div>
 
 <script>
   // ---------- 工具函数 ----------
-  // 获取存储的 Key
   function getQweatherKey() {
     return localStorage.getItem('qweather_key') || '';
   }
 
-  // 保存 Key
   function setQweatherKey(key) {
     if (key && key.trim() !== '') {
       localStorage.setItem('qweather_key', key.trim());
@@ -368,7 +478,6 @@
     updateKeyStatus();
   }
 
-  // 更新界面上的 Key 状态
   function updateKeyStatus() {
     const statusEl = document.getElementById('keyStatus');
     const key = getQweatherKey();
@@ -406,6 +515,15 @@
   const searchInput = document.getElementById('searchInput');
   const settingsBtn = document.getElementById('settingsBtn');
 
+  // 新卡片容器
+  const indicesCard = document.getElementById('indicesCard');
+  const indicesGrid = document.getElementById('indicesGrid');
+  const astroCard = document.getElementById('astroCard');
+  const astroGrid = document.getElementById('astroGrid');
+  const minutelyCard = document.getElementById('minutelyCard');
+  const minutelyContainer = document.getElementById('minutelyContainer');
+  const minutelySummary = document.getElementById('minutelySummary');
+
   // 辅助: WMO代码 -> 天气图标和描述
   function getWeatherIconAndDesc(code) {
     const map = {
@@ -434,7 +552,7 @@
     return map[code] || { icon: '🌡️', desc: '未知' };
   }
 
-  // 获取城市名 (Open-Meteo Geocoding)
+  // 获取城市名 (反向地理编码)
   async function fetchCityName(lat, lon) {
     try {
       const rev = await fetch(`https://api.bigdatacloud.net/data/reverse-geocode-client?latitude=${lat}&longitude=${lon}&localityLanguage=zh`);
@@ -519,41 +637,54 @@
     }
   }
 
-  // 核心: 加载所有天气 (Open-Meteo + 和风天气AQI/预警，仅当Key存在时)
+  // ---------- 核心加载函数 ----------
   async function loadAllWeather() {
     showLoading();
     try {
+      // 1. 基础天气 (Open-Meteo)
       const openMeteoUrl = `https://api.open-meteo.com/v1/forecast?latitude=${currentLat}&longitude=${currentLon}&current_weather=true&hourly=temperature_2m,precipitation_probability,relative_humidity_2m,windspeed_10m,uv_index&daily=weathercode,temperature_2m_max,temperature_2m_min,precipitation_probability_max&timezone=auto`;
-
-      // 获取天气基础数据
       const weatherRes = await fetch(openMeteoUrl);
       const weatherData = await weatherRes.json();
-
-      // 处理实时、小时、逐日
       renderCurrentWeather(weatherData);
       renderHourly(weatherData);
       renderDaily(weatherData);
 
-      // 尝试获取和风数据（仅当 Key 存在）
+      // 2. 和风天气增强功能 (需 Key)
       const qKey = getQweatherKey();
       if (qKey) {
-        const qweatherAqiUrl = `https://devapi.qweather.com/v7/air/now?location=${currentLon},${currentLat}&key=${qKey}`;
-        const qweatherWarningUrl = `https://devapi.qweather.com/v7/warning/now?location=${currentLon},${currentLat}&key=${qKey}`;
+        // 并行请求空气质量、预警、生活指数、天文、分钟降水
+        const aqiUrl = `https://devapi.qweather.com/v7/air/now?location=${currentLon},${currentLat}&key=${qKey}`;
+        const warnUrl = `https://devapi.qweather.com/v7/warning/now?location=${currentLon},${currentLat}&key=${qKey}`;
+        const indicesUrl = `https://devapi.qweather.com/v7/indices/1d?location=${currentLon},${currentLat}&key=${qKey}&type=1,2,3,5,6,7,8,9`;
+        const astroUrl = `https://devapi.qweather.com/v7/astronomy?location=${currentLon},${currentLat}&key=${qKey}`;
+        const minutelyUrl = `https://devapi.qweather.com/v7/minutely/5m?location=${currentLon},${currentLat}&key=${qKey}`;
 
-        const [aqiRes, warnRes] = await Promise.all([
-          fetch(qweatherAqiUrl),
-          fetch(qweatherWarningUrl)
+        const [aqiRes, warnRes, indicesRes, astroRes, minutelyRes] = await Promise.all([
+          fetch(aqiUrl),
+          fetch(warnUrl),
+          fetch(indicesUrl),
+          fetch(astroUrl),
+          fetch(minutelyUrl)
         ]);
+
         const aqiData = await aqiRes.json();
-        const warningData = await warnRes.json();
+        const warnData = await warnRes.json();
+        const indicesData = await indicesRes.json();
+        const astroData = await astroRes.json();
+        const minutelyData = await minutelyRes.json();
 
         renderAqi(aqiData);
-        renderWarning(warningData);
+        renderWarning(warnData);
+        renderIndices(indicesData);
+        renderAstro(astroData);
+        renderMinutely(minutelyData);
       } else {
-        // 未设置 Key 时显示提示
+        // 未设置 Key 时，显示提示并隐藏新卡片
         aqiEl.innerText = '请设置Key';
         alertCard.style.display = 'none';
-        // 可在此处显示一条友好提示，但为了简洁，只修改AQI字段
+        indicesCard.style.display = 'none';
+        astroCard.style.display = 'none';
+        minutelyCard.style.display = 'none';
       }
     } catch (error) {
       console.error(error);
@@ -563,6 +694,7 @@
     }
   }
 
+  // ---------- 渲染函数 ----------
   function renderCurrentWeather(data) {
     if (!data.current_weather) return;
     const current = data.current_weather;
@@ -653,6 +785,70 @@
     }
   }
 
+  // ----- 生活指数 -----
+  function renderIndices(data) {
+    if (data.code !== '200' || !data.daily || data.daily.length === 0) {
+      indicesCard.style.display = 'none';
+      return;
+    }
+    indicesCard.style.display = 'block';
+    indicesGrid.innerHTML = '';
+    // 只取第一天的指数（今日）
+    const todayIndices = data.daily.slice(0, 8); // 最多8种
+    todayIndices.forEach(item => {
+      const div = document.createElement('div');
+      div.className = 'index-item';
+      div.innerHTML = `
+        <div class="index-name">${item.name}</div>
+        <div class="index-level">${item.level}</div>
+        <div class="index-desc">${item.text || ''}</div>
+      `;
+      indicesGrid.appendChild(div);
+    });
+  }
+
+  // ----- 天文 -----
+  function renderAstro(data) {
+    if (data.code !== '200' || !data.sunrise) {
+      astroCard.style.display = 'none';
+      return;
+    }
+    astroCard.style.display = 'block';
+    astroGrid.innerHTML = `
+      <div class="astro-item"><span class="astro-icon">🌅</span><div class="astro-label">日出</div><div class="astro-time">${data.sunrise}</div></div>
+      <div class="astro-item"><span class="astro-icon">🌇</span><div class="astro-label">日落</div><div class="astro-time">${data.sunset}</div></div>
+      <div class="astro-item"><span class="astro-icon">🌙</span><div class="astro-label">月出</div><div class="astro-time">${data.moonrise || '--'}</div></div>
+      <div class="astro-item"><span class="astro-icon">🌚</span><div class="astro-label">月落</div><div class="astro-time">${data.moonset || '--'}</div></div>
+    `;
+  }
+
+  // ----- 分钟降水 -----
+  function renderMinutely(data) {
+    if (data.code !== '200' || !data.minutely || data.minutely.length === 0) {
+      minutelyCard.style.display = 'none';
+      return;
+    }
+    minutelyCard.style.display = 'block';
+    // 取未来1小时（12个5分钟点）
+    const items = data.minutely.slice(0, 12);
+    const maxPrecip = Math.max(...items.map(d => d.precipitation), 0.1);
+    minutelyContainer.innerHTML = '';
+    items.forEach(item => {
+      const bar = document.createElement('div');
+      const height = maxPrecip > 0 ? Math.max(4, (item.precipitation / maxPrecip) * 70) : 4;
+      bar.className = `minute-bar${item.precipitation > 0 ? ' has-rain' : ''}`;
+      bar.style.height = height + 'px';
+      // 用 data 属性保存时间，不显示标签以免拥挤
+      minutelyContainer.appendChild(bar);
+    });
+    // 摘要信息
+    const hasRain = items.some(d => d.precipitation > 0);
+    const maxVal = maxPrecip.toFixed(1);
+    minutelySummary.textContent = hasRain 
+      ? `未来1小时有降雨，最大强度 ${maxVal} mm/h` 
+      : '未来1小时无降雨';
+  }
+
   function showLoading() {
     document.querySelectorAll('.loading').forEach(el => el.innerHTML = '加载中...');
   }
@@ -666,7 +862,7 @@
     const newKey = prompt('请输入您的和风天气 API Key：', currentKey);
     if (newKey !== null) {
       setQweatherKey(newKey);
-      loadAllWeather(); // 重新加载以应用新Key
+      loadAllWeather();
     }
   }
 
