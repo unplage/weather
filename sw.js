@@ -1,11 +1,10 @@
-const CACHE_NAME = 'weather-pwa-v1-2209';
+const CACHE_NAME = 'weather-pwa-v1-2053';
 const urlsToCache = [
-  '/',
-  '/index.html',
-  '/manifest.json'
+  '/weather/',
+  '/weather/index.html',
+  '/weather/manifest.json'
 ];
 
-// 安装阶段缓存静态文件
 self.addEventListener('install', event => {
   event.waitUntil(
     caches.open(CACHE_NAME).then(cache => cache.addAll(urlsToCache))
@@ -13,13 +12,12 @@ self.addEventListener('install', event => {
   self.skipWaiting();
 });
 
-// 网络优先策略：天气API使用 NetworkFirst，静态资源使用 CacheFirst
 self.addEventListener('fetch', event => {
   const url = event.request.url;
-  // 天气API请求（Open-Meteo 和 和风天气）采用 NetworkFirst，确保数据新鲜
-  if (url.includes('api.open-meteo.com') || 
-      url.includes('qweatherapi.com') ||      // 新增：匹配专属 Host
-      url.includes('devapi.qweather.com')) {  // 保留旧地址兼容
+  // 天气API请求（Open-Meteo 和 和风天气）采用 NetworkFirst
+  if (url.includes('api.open-meteo.com') ||
+      url.includes('qweatherapi.com') ||
+      url.includes('devapi.qweather.com')) {
     event.respondWith(
       fetch(event.request)
         .then(response => {
@@ -30,7 +28,6 @@ self.addEventListener('fetch', event => {
         .catch(() => caches.match(event.request))
     );
   } else {
-    // 其他静态资源，优先使用缓存
     event.respondWith(
       caches.match(event.request)
         .then(response => response || fetch(event.request))
@@ -38,7 +35,6 @@ self.addEventListener('fetch', event => {
   }
 });
 
-// 清理旧缓存
 self.addEventListener('activate', event => {
   event.waitUntil(
     caches.keys().then(keys => Promise.all(
