@@ -4,10 +4,10 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
   <title>随行天气 · 精准预报</title>
-  <link rel="manifest" href="manifest.json">
+  <link rel="manifest" href="./manifest.json">
   <meta name="theme-color" content="#1E88E5">
   <meta name="apple-mobile-web-app-capable" content="yes">
-  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="mobile-web-app-capable" content="yes">
   <style>
     * {
       margin: 0;
@@ -325,7 +325,6 @@
       border: none;
     }
 
-    /* 设置相关 */
     .settings-area {
       display: flex;
       align-items: center;
@@ -367,7 +366,6 @@
       font-size: 18px;
     }
 
-    /* 设置卡片 - 覆盖层 */
     .settings-overlay {
       position: fixed;
       top: 0;
@@ -457,6 +455,12 @@
       margin-top: -12px;
       margin-bottom: 12px;
     }
+    .hint code {
+      background: #f1f5f9;
+      padding: 2px 8px;
+      border-radius: 4px;
+      font-size: 12px;
+    }
   </style>
 </head>
 <body>
@@ -519,7 +523,7 @@
     <div class="indices-grid" id="indicesGrid"></div>
   </div>
 
-  <!-- 天文 -->
+  <!-- 天文信息（修复版：合并日出日落 + 月升月落） -->
   <div class="card" id="astroCard" style="display:none;">
     <div class="section-title">🌙 天文信息</div>
     <div class="astro-grid" id="astroGrid"></div>
@@ -540,8 +544,8 @@
   <div class="settings-panel">
     <h3>⚙️ 和风天气设置</h3>
     <label for="apiHostInput">API Host（专属域名）</label>
-    <input type="text" id="apiHostInput" placeholder="例如: https://abc123.def.qweatherapi.com" autocomplete="off">
-    <div class="hint">如需使用开发版公共地址，请填入 <code>https://devapi.qweather.com</code></div>
+    <input type="text" id="apiHostInput" placeholder="例如: https://m33wt3hj26.re.qweatherapi.com" autocomplete="off">
+    <div class="hint">从 <a href="https://console.qweather.com/setting/" target="_blank">控制台设置</a> 获取你的专属 API Host[reference:3]</div>
 
     <label for="apiKeyInput">API Key</label>
     <input type="text" id="apiKeyInput" placeholder="您的和风天气 Key" autocomplete="off">
@@ -563,7 +567,7 @@
   }
   function setQweatherHost(host) {
     if (host && host.trim() !== '') {
-      localStorage.setItem('qweather_host', host.trim());
+      localStorage.setItem('qweather_host', host.trim().replace(/\/+$/, ''));
     } else {
       localStorage.removeItem('qweather_host');
     }
@@ -741,6 +745,25 @@
     }
   }
 
+  // ---------- 安全请求封装 ----------
+  async function safeFetchJson(url) {
+    try {
+      const res = await fetch(url);
+      if (!res.ok) {
+        // 尝试解析错误信息，如果失败则返回 HTTP 状态码
+        try {
+          const errorData = await res.json();
+          return errorData;
+        } catch {
+          return { code: String(res.status), msg: res.statusText };
+        }
+      }
+      return await res.json();
+    } catch (e) {
+      return { code: 'network_error', msg: e.message };
+    }
+  }
+
   // ---------- 核心加载 (使用用户设置的 Host) ----------
   async function loadAllWeather() {
     showLoading();
@@ -754,41 +777,34 @@
       renderHourly(weatherData);
       renderDaily(weatherData);
 
-      // 2. 和风天气增强 (使用用户设置的 Host 和 Key)
-      const host = getQweatherHost() || 'https://devapi.qweather.com'; // 若未设置则使用公共地址
+      // 2. 和风天气增强功能
+      const host = getQweatherHost() || 'https://devapi.qweather.com';
       const key = getQweatherKey();
+      const base = host.replace(/\/+$/, '');
+
       if (host && key) {
         const commonParams = `location=${currentLon},${currentLat}&key=${key}`;
-        // 确保 host 不以 / 结尾
-        const base = host.replace(/\/+$/, '');
-        const fetchTasks = [
-          { name: 'aqi', url: `${base}/v7/air/now?${commonParams}` },
-          { name: 'warning', url: `${base}/v7/warning/now?${commonParams}` },
-          { name: 'indices', url: `${base}/v7/indices/1d?${commonParams}&type=1,2,3,5,6,7,8,9` },
-          { name: 'astro', url: `${base}/v7/astronomy?${commonParams}` },
-          { name: 'minutely', url: `${base}/v7/minutely/5m?${commonParams}` }
-        ];
 
-        const results = await Promise.allSettled(
-          fetchTasks.map(task => fetch(task.url).then(res => res.json()))
-        );
+        // 并行请求所有和风接口
+        const aqiPromise = safeFetchJson(`${base}/v7/air/now?${commonParams}`);
+        const warningPromise = safeFetchJson(`${base}/v7/warning/now?${commonParams}`);
+        const indicesPromise = safeFetchJson(`${base}/v7/indices/1d?${commonParams}&type=1,2,3,5,6,7,8,9`);
+        // 【修复1】天文接口拆分为 sun 和 moon 两个独立请求[reference:4][reference:5]
+        const sunPromise = safeFetchJson(`${base}/v7/astronomy/sun?${commonParams}&date=${getTodayStr()}`);
+        const moonPromise = safeFetchJson(`${base}/v7/astronomy/moon?${commonParams}&date=${getTodayStr()}`);
+        const minutelyPromise = safeFetchJson(`${base}/v7/minutely/5m?${commonParams}`);
 
-        const [aqiResult, warningResult, indicesResult, astroResult, minutelyResult] = results;
+        const [aqiData, warningData, indicesData, sunData, moonData, minutelyData] = await Promise.all([
+          aqiPromise, warningPromise, indicesPromise, sunPromise, moonPromise, minutelyPromise
+        ]);
 
-        if (aqiResult.status === 'fulfilled') renderAqi(aqiResult.value);
-        else { console.warn('AQI 失败:', aqiResult.reason); aqiEl.innerText = '加载失败'; }
-
-        if (warningResult.status === 'fulfilled') renderWarning(warningResult.value);
-        else { console.warn('预警失败:', warningResult.reason); alertCard.style.display = 'none'; }
-
-        if (indicesResult.status === 'fulfilled') renderIndices(indicesResult.value);
-        else { console.warn('指数失败:', indicesResult.reason); indicesCard.style.display = 'none'; }
-
-        if (astroResult.status === 'fulfilled') renderAstro(astroResult.value);
-        else { console.warn('天文失败:', astroResult.reason); astroCard.style.display = 'none'; }
-
-        if (minutelyResult.status === 'fulfilled') renderMinutely(minutelyResult.value);
-        else { console.warn('分钟降水失败:', minutelyResult.reason); minutelyCard.style.display = 'none'; }
+        // 渲染各模块
+        renderAqi(aqiData);
+        renderWarning(warningData);
+        renderIndices(indicesData);
+        // 【修复2】合并日出日落 + 月升月落数据
+        renderAstro(sunData, moonData);
+        renderMinutely(minutelyData);
       } else {
         // 未设置 Host 或 Key 时隐藏和风卡片
         aqiEl.innerText = '请设置';
@@ -805,7 +821,16 @@
     }
   }
 
-  // ---------- 渲染函数 (与之前相同) ----------
+  // 获取今日日期字符串 (yyyyMMdd)
+  function getTodayStr() {
+    const now = new Date();
+    const y = now.getFullYear();
+    const m = String(now.getMonth() + 1).padStart(2, '0');
+    const d = String(now.getDate()).padStart(2, '0');
+    return `${y}${m}${d}`;
+  }
+
+  // ---------- 渲染函数 ----------
   function renderCurrentWeather(data) {
     if (!data.current_weather) return;
     const current = data.current_weather;
@@ -814,14 +839,14 @@
     const { icon, desc } = getWeatherIconAndDesc(weatherCode);
     tempNowEl.innerHTML = `${Math.round(temperature)}<small>°</small>`;
     weatherDescEl.innerHTML = `${icon} ${desc}`;
-    if (data.daily && data.daily.temperature_2m_max.length>0) {
+    if (data.daily && data.daily.temperature_2m_max.length > 0) {
       const max = Math.round(data.daily.temperature_2m_max[0]);
       const min = Math.round(data.daily.temperature_2m_min[0]);
       highLowEl.innerHTML = `↑ ${max}°  ↓ ${min}°`;
     }
     if (data.hourly && data.hourly.time.length) {
       const now = new Date();
-      const nowHourStr = now.toISOString().slice(0,13)+":00";
+      const nowHourStr = now.toISOString().slice(0, 13) + ":00";
       const idx = data.hourly.time.findIndex(t => t >= nowHourStr);
       const validIdx = idx !== -1 ? idx : 0;
       const humidity = data.hourly.relative_humidity_2m?.[validIdx];
@@ -836,8 +861,8 @@
   function renderHourly(data) {
     if (!data.hourly) return;
     const times = data.hourly.time.slice(0, 24);
-    const temps = data.hourly.temperature_2m.slice(0,24);
-    const rains = data.hourly.precipitation_probability.slice(0,24);
+    const temps = data.hourly.temperature_2m.slice(0, 24);
+    const rains = data.hourly.precipitation_probability.slice(0, 24);
     hourlyContainer.innerHTML = '';
     times.forEach((time, i) => {
       const date = new Date(time);
@@ -877,16 +902,28 @@
     }
   }
 
+  // 【修复3】AQI 增加 403 错误码识别[reference:6]
   function renderAqi(aqiData) {
+    if (!aqiData || aqiData.code === 'network_error') {
+      aqiEl.innerText = '网络错误';
+      return;
+    }
     if (aqiData.code === '200' && aqiData.now) {
-      const aqi = aqiData.now.aqi;
-      aqiEl.innerText = aqi || '--';
+      aqiEl.innerText = aqiData.now.aqi || '--';
+    } else if (aqiData.code === '403' || aqiData.code === 'FORBIDDEN') {
+      aqiEl.innerText = '需升级订阅';
+    } else if (aqiData.code === '400' && aqiData.error && aqiData.error.detail === 'DATA NOT AVAILABLE') {
+      aqiEl.innerText = '该地区不支持';
     } else {
       aqiEl.innerText = '暂不可用';
     }
   }
 
   function renderWarning(warningData) {
+    if (!warningData || warningData.code === 'network_error') {
+      alertCard.style.display = 'none';
+      return;
+    }
     if (warningData.code === '200' && warningData.warning && warningData.warning.length > 0) {
       const warn = warningData.warning[0];
       alertContent.innerHTML = `${warn.title} · ${warn.level} · ${warn.text}`;
@@ -897,7 +934,7 @@
   }
 
   function renderIndices(data) {
-    if (data.code !== '200' || !data.daily || data.daily.length === 0) {
+    if (!data || data.code === 'network_error' || data.code !== '200' || !data.daily || data.daily.length === 0) {
       indicesCard.style.display = 'none';
       return;
     }
@@ -916,22 +953,50 @@
     });
   }
 
-  function renderAstro(data) {
-    if (data.code !== '200' || !data.sunrise) {
+  // 【修复4】天文渲染函数：接收 sunData 和 moonData 两个独立数据源
+  function renderAstro(sunData, moonData) {
+    // 检查数据有效性
+    const sunValid = sunData && sunData.code === '200' && sunData.sunrise;
+    const moonValid = moonData && moonData.code === '200';
+
+    if (!sunValid && !moonValid) {
       astroCard.style.display = 'none';
       return;
     }
+
     astroCard.style.display = 'block';
+    const sunrise = sunValid ? sunData.sunrise : '--';
+    const sunset = sunValid ? sunData.sunset : '--';
+    // 从日出时间中提取时分 (格式: 2021-02-20T06:58+08:00)[reference:7]
+    const formatTime = (datetime) => {
+      if (!datetime || datetime === '--') return '--';
+      try {
+        const parts = datetime.split('T');
+        if (parts.length < 2) return datetime;
+        const timePart = parts[1].split('+')[0].split('-')[0];
+        return timePart.slice(0, 5);
+      } catch {
+        return datetime;
+      }
+    };
+    const moonrise = moonValid ? (moonData.moonrise || '--') : '--';
+    const moonset = moonValid ? (moonData.moonset || '--') : '--';
+    const moonPhase = moonValid ? (moonData.moonPhase || '') : '';
+
     astroGrid.innerHTML = `
-      <div class="astro-item"><span class="astro-icon">🌅</span><div class="astro-label">日出</div><div class="astro-time">${data.sunrise}</div></div>
-      <div class="astro-item"><span class="astro-icon">🌇</span><div class="astro-label">日落</div><div class="astro-time">${data.sunset}</div></div>
-      <div class="astro-item"><span class="astro-icon">🌙</span><div class="astro-label">月出</div><div class="astro-time">${data.moonrise || '--'}</div></div>
-      <div class="astro-item"><span class="astro-icon">🌚</span><div class="astro-label">月落</div><div class="astro-time">${data.moonset || '--'}</div></div>
+      <div class="astro-item"><span class="astro-icon">🌅</span><div class="astro-label">日出</div><div class="astro-time">${formatTime(sunrise)}</div></div>
+      <div class="astro-item"><span class="astro-icon">🌇</span><div class="astro-label">日落</div><div class="astro-time">${formatTime(sunset)}</div></div>
+      <div class="astro-item"><span class="astro-icon">🌙</span><div class="astro-label">月出</div><div class="astro-time">${formatTime(moonrise)}</div></div>
+      <div class="astro-item"><span class="astro-icon">🌚</span><div class="astro-label">月落</div><div class="astro-time">${formatTime(moonset)}</div></div>
     `;
+    // 如果有月相数据，可以额外显示
+    if (moonPhase) {
+      // 可以追加到某个位置，暂不处理保持简洁
+    }
   }
 
   function renderMinutely(data) {
-    if (data.code !== '200' || !data.minutely || data.minutely.length === 0) {
+    if (!data || data.code === 'network_error' || data.code !== '200' || !data.minutely || data.minutely.length === 0) {
       minutelyCard.style.display = 'none';
       return;
     }
@@ -948,8 +1013,8 @@
     });
     const hasRain = items.some(d => d.precipitation > 0);
     const maxVal = maxPrecip.toFixed(1);
-    minutelySummary.textContent = hasRain 
-      ? `未来1小时有降雨，最大强度 ${maxVal} mm/h` 
+    minutelySummary.textContent = hasRain
+      ? `未来1小时有降雨，最大强度 ${maxVal} mm/h`
       : '未来1小时无降雨';
   }
 
@@ -1007,13 +1072,15 @@
     cancelSettingsBtn.onclick = closeSettings;
     saveSettingsBtn.onclick = saveSettings;
 
-    // 点击背景关闭
     settingsOverlay.addEventListener('click', (e) => {
       if (e.target === settingsOverlay) closeSettings();
     });
 
+    // 【修复5】Service Worker 使用相对路径注册，适配子目录部署
     if ('serviceWorker' in navigator) {
-      navigator.serviceWorker.register('./sw.js').then(reg => console.log('SW registered', reg)).catch(err => console.log('SW failed', err));
+      navigator.serviceWorker.register('./sw.js')
+        .then(reg => console.log('SW registered', reg))
+        .catch(err => console.log('SW failed', err));
     }
   }
 
