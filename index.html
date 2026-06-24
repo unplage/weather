@@ -9,7 +9,7 @@
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
   <style>
-    /* ===== 样式保持不变 ===== */
+    /* 样式不变，省略以节省篇幅，实际使用请保留完整样式 */
     * { margin: 0; padding: 0; box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
     body { font-family: system-ui, -apple-system, 'Segoe UI', 'Helvetica Neue', Helvetica, 'Noto Sans', sans-serif; background: #f5f7fb; color: #1f2937; padding: 0 0 20px 0; }
     ::-webkit-scrollbar { height: 4px; width: 4px; }
@@ -137,7 +137,7 @@
     <div class="daily-list" id="dailyContainer"><div class="loading">加载中...</div></div>
   </div>
 
-  <!-- 分钟降水（移到生活指数上方） -->
+  <!-- 分钟降水 -->
   <div class="card" id="minutelyCard" style="display:none;">
     <div class="section-title">🌧️ 分钟级降水预报</div>
     <div class="minutely-container" id="minutelyContainer"></div>
@@ -245,7 +245,7 @@
   const saveSettingsBtn = document.getElementById('saveSettingsBtn');
   const cancelSettingsBtn = document.getElementById('cancelSettingsBtn');
 
-  // ========== 图标映射 ==========
+  // ========== 图标映射（补全版） ==========
   function getWeatherEmoji(iconCode) {
     const map = {
       '100': '☀️', '101': '☀️', '102': '⛅', '103': '⛅', '104': '☁️',
@@ -429,7 +429,6 @@
       const nowPromise = safeFetchJson(`${base}/v7/weather/now?${commonParams}`);
       const hourlyPromise = safeFetchJson(`${base}/v7/weather/24h?${commonParams}`);
       const dailyPromise = safeFetchJson(`${base}/v7/weather/7d?${commonParams}`);
-      // 新版空气质量接口（使用 API Key 查询参数）
       const aqiUrl = `${base}/airquality/v1/current/${currentLat}/${currentLon}?key=${key}`;
       const aqiPromise = fetch(aqiUrl).then(res => res.json()).catch(() => ({ code: 'network_error' }));
       const warningPromise = safeFetchJson(`${base}/v7/warning/now?${commonParams}`);
@@ -498,6 +497,7 @@
     });
   }
 
+  // ===== 修复逐日预报：增加天气描述文字 =====
   function renderDaily(data) {
     if (!data || data.code !== '200' || !data.daily || data.daily.length === 0) {
       dailyContainer.innerHTML = '<div class="loading">暂无逐日预报</div>';
@@ -514,41 +514,35 @@
       }
       const row = document.createElement('div');
       row.className = 'daily-row';
+      // 使用 iconDay（或 fallback icon），并显示 textDay
+      const iconCode = d.iconDay || d.icon;
+      const weatherText = d.textDay || d.text || '';
       row.innerHTML = `
         <div class="daily-date">${dateDisplay}</div>
-        <div class="daily-icon">${getWeatherEmoji(d.icon)}</div>
+        <div class="daily-icon">${getWeatherEmoji(iconCode)}</div>
+        <div style="flex:1; text-align:left; padding-left:8px; font-size:14px; color:#4b5563;">${weatherText}</div>
         <div class="daily-temp">${d.tempMax}° / ${d.tempMin}°</div>
       `;
       dailyContainer.appendChild(row);
     });
   }
 
-  // 【修复】适配新版空气质量数据格式
   function renderAqi(data) {
-    // 处理网络错误或空数据
     if (!data || data.code === 'network_error') {
       aqiEl.innerText = '无数据';
       return;
     }
-
-    // 处理 API 返回的错误码（如 403）
     if (data.code && data.code !== '200') {
       aqiEl.innerText = data.code === '403' ? '需升级订阅' : `错误 ${data.code}`;
       return;
     }
-
-    // 适配新版数据结构：indexes 数组
     if (data.indexes && data.indexes.length > 0) {
-      // 优先使用中国标准 (cn-mee)，若不存在则取第一个
       const target = data.indexes.find(i => i.code === 'cn-mee') || data.indexes[0];
       if (target) {
-        // 显示 AQI 数值 + 等级（如 "46 (优)"）
         aqiEl.innerText = `${target.aqi} (${target.category})`;
         return;
       }
     }
-
-    // 兜底：数据格式不匹配
     console.warn('AQI 数据格式未知:', data);
     aqiEl.innerText = '暂不可用';
   }
