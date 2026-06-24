@@ -9,7 +9,7 @@
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
   <style>
-    /* ===== 样式不变（已省略，实际使用需保留完整样式） ===== */
+    /* ===== 样式保持不变 ===== */
     * { margin: 0; padding: 0; box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
     body { font-family: system-ui, -apple-system, 'Segoe UI', 'Helvetica Neue', Helvetica, 'Noto Sans', sans-serif; background: #f5f7fb; color: #1f2937; padding: 0 0 20px 0; }
     ::-webkit-scrollbar { height: 4px; width: 4px; }
@@ -137,7 +137,7 @@
     <div class="daily-list" id="dailyContainer"><div class="loading">加载中...</div></div>
   </div>
 
-  <!-- 分钟降水 -->
+  <!-- 分钟降水（移到生活指数上方） -->
   <div class="card" id="minutelyCard" style="display:none;">
     <div class="section-title">🌧️ 分钟级降水预报</div>
     <div class="minutely-container" id="minutelyContainer"></div>
@@ -523,30 +523,33 @@
     });
   }
 
-  // ===== 适配新版空气质量数据结构 =====
+  // 【修复】适配新版空气质量数据格式
   function renderAqi(data) {
-    // 处理网络错误或无数据
+    // 处理网络错误或空数据
     if (!data || data.code === 'network_error') {
-      aqiEl.innerText = '网络错误';
+      aqiEl.innerText = '无数据';
       return;
     }
-    // 检查新版返回数据
-    if (data.indexes && Array.isArray(data.indexes)) {
-      // 优先使用 US EPA 标准，也可用第一个
-      const epa = data.indexes.find(i => i.code === 'us-epa');
-      const target = epa || data.indexes[0];
-      if (target) {
-        // 显示 AQI 值和等级
-        aqiEl.innerText = `${target.aqi} (${target.category || ''})`;
-        return;
-      }
-    }
-    // 如果返回了错误码（如403）
+
+    // 处理 API 返回的错误码（如 403）
     if (data.code && data.code !== '200') {
       aqiEl.innerText = data.code === '403' ? '需升级订阅' : `错误 ${data.code}`;
       return;
     }
-    // 其他情况
+
+    // 适配新版数据结构：indexes 数组
+    if (data.indexes && data.indexes.length > 0) {
+      // 优先使用中国标准 (cn-mee)，若不存在则取第一个
+      const target = data.indexes.find(i => i.code === 'cn-mee') || data.indexes[0];
+      if (target) {
+        // 显示 AQI 数值 + 等级（如 "46 (优)"）
+        aqiEl.innerText = `${target.aqi} (${target.category})`;
+        return;
+      }
+    }
+
+    // 兜底：数据格式不匹配
+    console.warn('AQI 数据格式未知:', data);
     aqiEl.innerText = '暂不可用';
   }
 
