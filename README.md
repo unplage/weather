@@ -1,2 +1,3 @@
 # weather
-天气应用，基础功能+和风天气api
+https://unplage.github.io/weather/
+天气PWA应用，需自行申请和风天气api KEY
