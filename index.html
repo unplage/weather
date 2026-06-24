@@ -9,7 +9,7 @@
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
   <style>
-    /* ===== 样式保持不变 ===== */
+    /* ===== 样式不变（已省略，实际使用需保留完整样式） ===== */
     * { margin: 0; padding: 0; box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
     body { font-family: system-ui, -apple-system, 'Segoe UI', 'Helvetica Neue', Helvetica, 'Noto Sans', sans-serif; background: #f5f7fb; color: #1f2937; padding: 0 0 20px 0; }
     ::-webkit-scrollbar { height: 4px; width: 4px; }
@@ -137,7 +137,7 @@
     <div class="daily-list" id="dailyContainer"><div class="loading">加载中...</div></div>
   </div>
 
-  <!-- 分钟降水（移到生活指数上方） -->
+  <!-- 分钟降水 -->
   <div class="card" id="minutelyCard" style="display:none;">
     <div class="section-title">🌧️ 分钟级降水预报</div>
     <div class="minutely-container" id="minutelyContainer"></div>
@@ -277,28 +277,20 @@
     return `${y}${m}${d}`;
   }
 
-  // 安全提取小时
   function extractHour(timeStr) {
     if (!timeStr) return null;
     let date = new Date(timeStr);
-    if (!isNaN(date.getHours())) {
-      return date.getHours();
-    }
+    if (!isNaN(date.getHours())) return date.getHours();
     const match = timeStr.match(/(?:T|\s)(\d{2}):\d{2}/);
-    if (match) {
-      return parseInt(match[1], 10);
-    }
+    if (match) return parseInt(match[1], 10);
     const num = parseInt(timeStr, 10);
     if (!isNaN(num) && num > 1e9) {
       date = new Date(num * 1000);
-      if (!isNaN(date.getHours())) {
-        return date.getHours();
-      }
+      if (!isNaN(date.getHours())) return date.getHours();
     }
     return null;
   }
 
-  // 安全提取日期
   function extractDate(timeStr) {
     if (!timeStr) return null;
     let date = new Date(timeStr);
@@ -420,7 +412,7 @@
     }
   }
 
-  // ========== 核心加载（移除天文请求） ==========
+  // ========== 核心加载 ==========
   async function loadAllWeather() {
     showLoading();
     try {
@@ -437,10 +429,9 @@
       const nowPromise = safeFetchJson(`${base}/v7/weather/now?${commonParams}`);
       const hourlyPromise = safeFetchJson(`${base}/v7/weather/24h?${commonParams}`);
       const dailyPromise = safeFetchJson(`${base}/v7/weather/7d?${commonParams}`);
-      //const aqiPromise = safeFetchJson(`${base}/v7/air/now?${commonParams}`);
-	  // 直接在 URL 中传递 key 参数
+      // 新版空气质量接口（使用 API Key 查询参数）
       const aqiUrl = `${base}/airquality/v1/current/${currentLat}/${currentLon}?key=${key}`;
-      const aqiPromise = fetch(aqiUrl).then(res => res.json());
+      const aqiPromise = fetch(aqiUrl).then(res => res.json()).catch(() => ({ code: 'network_error' }));
       const warningPromise = safeFetchJson(`${base}/v7/warning/now?${commonParams}`);
       const indicesPromise = safeFetchJson(`${base}/v7/indices/1d?${commonParams}&type=1,2,3,5,6,7,8,9`);
       const minutelyPromise = safeFetchJson(`${base}/v7/minutely/5m?${commonParams}`);
@@ -466,7 +457,7 @@
     }
   }
 
-  // ========== 渲染函数（移除天文相关） ==========
+  // ========== 渲染函数 ==========
   function renderCurrentWeather(data) {
     if (!data || data.code !== '200' || !data.now) {
       tempNowEl.innerHTML = '--<small>°</small>';
@@ -532,12 +523,31 @@
     });
   }
 
+  // ===== 适配新版空气质量数据结构 =====
   function renderAqi(data) {
-    if (!data || data.code !== '200' || !data.now) {
-      aqiEl.innerText = data?.code === '403' ? '需升级订阅' : '暂不可用';
+    // 处理网络错误或无数据
+    if (!data || data.code === 'network_error') {
+      aqiEl.innerText = '网络错误';
       return;
     }
-    aqiEl.innerText = data.now.aqi || '--';
+    // 检查新版返回数据
+    if (data.indexes && Array.isArray(data.indexes)) {
+      // 优先使用 US EPA 标准，也可用第一个
+      const epa = data.indexes.find(i => i.code === 'us-epa');
+      const target = epa || data.indexes[0];
+      if (target) {
+        // 显示 AQI 值和等级
+        aqiEl.innerText = `${target.aqi} (${target.category || ''})`;
+        return;
+      }
+    }
+    // 如果返回了错误码（如403）
+    if (data.code && data.code !== '200') {
+      aqiEl.innerText = data.code === '403' ? '需升级订阅' : `错误 ${data.code}`;
+      return;
+    }
+    // 其他情况
+    aqiEl.innerText = '暂不可用';
   }
 
   function renderWarning(data) {
