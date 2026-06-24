@@ -9,7 +9,7 @@
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
   <style>
-    /* ===== 样式与原版一致，为节省篇幅此处省略，实际已包含全部样式 ===== */
+    /* ===== 样式与原版完全一致，为节省篇幅此处省略，但实际部署时请保留完整样式 ===== */
     * { margin: 0; padding: 0; box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
     body { font-family: system-ui, -apple-system, 'Segoe UI', 'Helvetica Neue', Helvetica, 'Noto Sans', sans-serif; background: #f5f7fb; color: #1f2937; padding: 0 0 20px 0; }
     ::-webkit-scrollbar { height: 4px; width: 4px; }
@@ -260,7 +260,6 @@
 
   // ========== 图标映射 ==========
   function getWeatherEmoji(iconCode) {
-    // 和风天气图标代码对照表（仅列举常见）
     const map = {
       '100': '☀️', '101': '☀️', '102': '⛅', '103': '⛅', '104': '☁️',
       '150': '☀️', '151': '☀️', '152': '⛅', '153': '⛅',
@@ -289,6 +288,27 @@
     const m = String(now.getMonth() + 1).padStart(2, '0');
     const d = String(now.getDate()).padStart(2, '0');
     return `${y}${m}${d}`;
+  }
+
+  // 安全提取时间字符串中的小时（适用于 "2026-06-24T12:00+08:00" 或 "2026-06-24 12:00"）
+  function extractHour(timeStr) {
+    if (!timeStr) return null;
+    // 匹配 T 或空格后面的时分
+    const match = timeStr.match(/(?:T|\s)(\d{2}):\d{2}/);
+    if (match) return parseInt(match[1], 10);
+    return null;
+  }
+
+  // 安全提取日期字符串（返回 "月/日"）
+  function extractDate(timeStr) {
+    if (!timeStr) return null;
+    const match = timeStr.match(/(\d{4})-(\d{2})-(\d{2})/);
+    if (match) {
+      const month = parseInt(match[2], 10);
+      const day = parseInt(match[3], 10);
+      return `${month}月${day}日`;
+    }
+    return null;
   }
 
   async function fetchCityName(lat, lon) {
@@ -406,7 +426,6 @@
         return;
       }
 
-      // 构建所有请求
       const nowPromise = safeFetchJson(`${base}/v7/weather/now?${commonParams}`);
       const hourlyPromise = safeFetchJson(`${base}/v7/weather/24h?${commonParams}`);
       const dailyPromise = safeFetchJson(`${base}/v7/weather/7d?${commonParams}`);
@@ -459,6 +478,7 @@
     feelsLikeEl.innerText = `${now.feelsLike}°`;
   }
 
+  // ===== 修复逐小时：使用 extractHour 安全提取小时 =====
   function renderHourly(data) {
     if (!data || data.code !== '200' || !data.hourly || data.hourly.length === 0) {
       hourlyContainer.innerHTML = '<div class="loading">暂无小时预报</div>';
@@ -467,12 +487,12 @@
     const hours = data.hourly.slice(0, 24);
     hourlyContainer.innerHTML = '';
     hours.forEach(h => {
-      const time = new Date(h.time);
-      const hour = time.getHours();
+      const hour = extractHour(h.time);
+      const displayHour = (hour !== null) ? `${hour}:00` : '--:00';
       const div = document.createElement('div');
       div.className = 'hour-item';
       div.innerHTML = `
-        <div class="hour-time">${hour}:00</div>
+        <div class="hour-time">${displayHour}</div>
         <div class="hour-temp">${h.temp}°</div>
         <div class="hour-rain">💧${h.pop || 0}%</div>
       `;
@@ -480,6 +500,7 @@
     });
   }
 
+  // ===== 修复逐日：使用 extractDate 安全提取日期 =====
   function renderDaily(data) {
     if (!data || data.code !== '200' || !data.daily || data.daily.length === 0) {
       dailyContainer.innerHTML = '<div class="loading">暂无逐日预报</div>';
@@ -487,12 +508,17 @@
     }
     dailyContainer.innerHTML = '';
     data.daily.forEach((d, idx) => {
-      const date = new Date(d.time);
-      const weekStr = idx === 0 ? '今天' : date.toLocaleDateString('zh-CN', { weekday: 'short' });
+      let dateDisplay = '';
+      if (idx === 0) {
+        dateDisplay = '今天';
+      } else {
+        const dateStr = extractDate(d.time);
+        dateDisplay = dateStr || '未知日期';
+      }
       const row = document.createElement('div');
       row.className = 'daily-row';
       row.innerHTML = `
-        <div class="daily-date">${weekStr}</div>
+        <div class="daily-date">${dateDisplay}</div>
         <div class="daily-icon">${getWeatherEmoji(d.icon)}</div>
         <div class="daily-temp">${d.tempMax}° / ${d.tempMin}°</div>
       `;
@@ -500,7 +526,7 @@
     });
   }
 
-  // 以下函数与之前相同（仅作适配，无需修改）
+  // 以下函数保持不变
   function renderAqi(data) {
     if (!data || data.code !== '200' || !data.now) {
       aqiEl.innerText = data?.code === '403' ? '需升级订阅' : '暂不可用';
