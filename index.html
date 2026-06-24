@@ -9,7 +9,7 @@
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
   <style>
-    /* ===== 样式与原版完全一致，为节省篇幅此处省略，但实际部署时请保留完整样式 ===== */
+    /* ===== 样式保持不变 ===== */
     * { margin: 0; padding: 0; box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
     body { font-family: system-ui, -apple-system, 'Segoe UI', 'Helvetica Neue', Helvetica, 'Noto Sans', sans-serif; background: #f5f7fb; color: #1f2937; padding: 0 0 20px 0; }
     ::-webkit-scrollbar { height: 4px; width: 4px; }
@@ -53,11 +53,6 @@
     .index-name { font-size: 13px; color: #6b7280; }
     .index-level { font-weight: 600; font-size: 16px; margin-top: 4px; }
     .index-desc { font-size: 12px; color: #6b7280; margin-top: 2px; }
-    .astro-grid { display: flex; justify-content: space-around; flex-wrap: wrap; gap: 12px; }
-    .astro-item { text-align: center; min-width: 60px; }
-    .astro-icon { font-size: 28px; display: block; }
-    .astro-label { font-size: 12px; color: #6b7280; margin-top: 4px; }
-    .astro-time { font-weight: 600; font-size: 16px; }
     .minutely-container { display: flex; align-items: flex-end; height: 80px; gap: 4px; padding-top: 12px; overflow-x: auto; }
     .minute-bar { flex: 0 0 12px; background: #93c5fd; border-radius: 4px 4px 0 0; min-height: 4px; transition: height 0.2s; }
     .minute-bar.has-rain { background: #3b82f6; }
@@ -142,23 +137,17 @@
     <div class="daily-list" id="dailyContainer"><div class="loading">加载中...</div></div>
   </div>
 
-  <!-- 生活指数 -->
-  <div class="card" id="indicesCard" style="display:none;">
-    <div class="section-title">🌟 生活指数</div>
-    <div class="indices-grid" id="indicesGrid"></div>
-  </div>
-
-  <!-- 天文信息 -->
-  <div class="card" id="astroCard" style="display:none;">
-    <div class="section-title">🌙 天文信息</div>
-    <div class="astro-grid" id="astroGrid"></div>
-  </div>
-
-  <!-- 分钟降水 -->
+  <!-- 分钟降水（移到生活指数上方） -->
   <div class="card" id="minutelyCard" style="display:none;">
     <div class="section-title">🌧️ 分钟级降水预报</div>
     <div class="minutely-container" id="minutelyContainer"></div>
     <div class="minutely-summary" id="minutelySummary"></div>
+  </div>
+
+  <!-- 生活指数 -->
+  <div class="card" id="indicesCard" style="display:none;">
+    <div class="section-title">🌟 生活指数</div>
+    <div class="indices-grid" id="indicesGrid"></div>
   </div>
 
   <footer>数据源: 和风天气 · 个人PWA</footer>
@@ -245,8 +234,6 @@
   const settingsBtn = document.getElementById('settingsBtn');
   const indicesCard = document.getElementById('indicesCard');
   const indicesGrid = document.getElementById('indicesGrid');
-  const astroCard = document.getElementById('astroCard');
-  const astroGrid = document.getElementById('astroGrid');
   const minutelyCard = document.getElementById('minutelyCard');
   const minutelyContainer = document.getElementById('minutelyContainer');
   const minutelySummary = document.getElementById('minutelySummary');
@@ -290,23 +277,44 @@
     return `${y}${m}${d}`;
   }
 
-  // 安全提取时间字符串中的小时（适用于 "2026-06-24T12:00+08:00" 或 "2026-06-24 12:00"）
+  // 安全提取小时
   function extractHour(timeStr) {
     if (!timeStr) return null;
-    // 匹配 T 或空格后面的时分
+    let date = new Date(timeStr);
+    if (!isNaN(date.getHours())) {
+      return date.getHours();
+    }
     const match = timeStr.match(/(?:T|\s)(\d{2}):\d{2}/);
-    if (match) return parseInt(match[1], 10);
+    if (match) {
+      return parseInt(match[1], 10);
+    }
+    const num = parseInt(timeStr, 10);
+    if (!isNaN(num) && num > 1e9) {
+      date = new Date(num * 1000);
+      if (!isNaN(date.getHours())) {
+        return date.getHours();
+      }
+    }
     return null;
   }
 
-  // 安全提取日期字符串（返回 "月/日"）
+  // 安全提取日期
   function extractDate(timeStr) {
     if (!timeStr) return null;
+    let date = new Date(timeStr);
+    if (!isNaN(date.getMonth())) {
+      return `${date.getMonth()+1}月${date.getDate()}日`;
+    }
     const match = timeStr.match(/(\d{4})-(\d{2})-(\d{2})/);
     if (match) {
-      const month = parseInt(match[2], 10);
-      const day = parseInt(match[3], 10);
-      return `${month}月${day}日`;
+      return `${parseInt(match[2],10)}月${parseInt(match[3],10)}日`;
+    }
+    const num = parseInt(timeStr, 10);
+    if (!isNaN(num) && num > 1e9) {
+      date = new Date(num * 1000);
+      if (!isNaN(date.getMonth())) {
+        return `${date.getMonth()+1}月${date.getDate()}日`;
+      }
     }
     return null;
   }
@@ -412,7 +420,7 @@
     }
   }
 
-  // ========== 核心加载（全部和风） ==========
+  // ========== 核心加载（移除天文请求） ==========
   async function loadAllWeather() {
     showLoading();
     try {
@@ -432,13 +440,11 @@
       const aqiPromise = safeFetchJson(`${base}/v7/air/now?${commonParams}`);
       const warningPromise = safeFetchJson(`${base}/v7/warning/now?${commonParams}`);
       const indicesPromise = safeFetchJson(`${base}/v7/indices/1d?${commonParams}&type=1,2,3,5,6,7,8,9`);
-      const sunPromise = safeFetchJson(`${base}/v7/astronomy/sun?${commonParams}&date=${getTodayStr()}`);
-      const moonPromise = safeFetchJson(`${base}/v7/astronomy/moon?${commonParams}&date=${getTodayStr()}`);
       const minutelyPromise = safeFetchJson(`${base}/v7/minutely/5m?${commonParams}`);
 
-      const [nowData, hourlyData, dailyData, aqiData, warningData, indicesData, sunData, moonData, minutelyData] = await Promise.all([
+      const [nowData, hourlyData, dailyData, aqiData, warningData, indicesData, minutelyData] = await Promise.all([
         nowPromise, hourlyPromise, dailyPromise, aqiPromise, warningPromise,
-        indicesPromise, sunPromise, moonPromise, minutelyPromise
+        indicesPromise, minutelyPromise
       ]);
 
       renderCurrentWeather(nowData);
@@ -447,7 +453,6 @@
       renderAqi(aqiData);
       renderWarning(warningData);
       renderIndices(indicesData);
-      renderAstro(sunData, moonData);
       renderMinutely(minutelyData);
 
     } catch (error) {
@@ -458,7 +463,7 @@
     }
   }
 
-  // ========== 渲染函数 ==========
+  // ========== 渲染函数（移除天文相关） ==========
   function renderCurrentWeather(data) {
     if (!data || data.code !== '200' || !data.now) {
       tempNowEl.innerHTML = '--<small>°</small>';
@@ -478,7 +483,6 @@
     feelsLikeEl.innerText = `${now.feelsLike}°`;
   }
 
-  // ===== 修复逐小时：使用 extractHour 安全提取小时 =====
   function renderHourly(data) {
     if (!data || data.code !== '200' || !data.hourly || data.hourly.length === 0) {
       hourlyContainer.innerHTML = '<div class="loading">暂无小时预报</div>';
@@ -487,7 +491,7 @@
     const hours = data.hourly.slice(0, 24);
     hourlyContainer.innerHTML = '';
     hours.forEach(h => {
-      const hour = extractHour(h.time);
+      const hour = h.fxTime ? extractHour(h.fxTime) : null;
       const displayHour = (hour !== null) ? `${hour}:00` : '--:00';
       const div = document.createElement('div');
       div.className = 'hour-item';
@@ -500,7 +504,6 @@
     });
   }
 
-  // ===== 修复逐日：使用 extractDate 安全提取日期 =====
   function renderDaily(data) {
     if (!data || data.code !== '200' || !data.daily || data.daily.length === 0) {
       dailyContainer.innerHTML = '<div class="loading">暂无逐日预报</div>';
@@ -512,7 +515,7 @@
       if (idx === 0) {
         dateDisplay = '今天';
       } else {
-        const dateStr = extractDate(d.time);
+        const dateStr = d.fxDate ? extractDate(d.fxDate) : null;
         dateDisplay = dateStr || '未知日期';
       }
       const row = document.createElement('div');
@@ -526,7 +529,6 @@
     });
   }
 
-  // 以下函数保持不变
   function renderAqi(data) {
     if (!data || data.code !== '200' || !data.now) {
       aqiEl.innerText = data?.code === '403' ? '需升级订阅' : '暂不可用';
@@ -562,27 +564,6 @@
       `;
       indicesGrid.appendChild(div);
     });
-  }
-
-  function renderAstro(sunData, moonData) {
-    const sunValid = sunData && sunData.code === '200' && sunData.sunrise;
-    const moonValid = moonData && moonData.code === '200';
-    if (!sunValid && !moonValid) {
-      astroCard.style.display = 'none';
-      return;
-    }
-    astroCard.style.display = 'block';
-    const format = (t) => t ? t.split('T')[1]?.slice(0,5) || t : '--';
-    const sunrise = sunValid ? format(sunData.sunrise) : '--';
-    const sunset = sunValid ? format(sunData.sunset) : '--';
-    const moonrise = moonValid && moonData.moonrise ? format(moonData.moonrise) : '--';
-    const moonset = moonValid && moonData.moonset ? format(moonData.moonset) : '--';
-    astroGrid.innerHTML = `
-      <div class="astro-item"><span class="astro-icon">🌅</span><div class="astro-label">日出</div><div class="astro-time">${sunrise}</div></div>
-      <div class="astro-item"><span class="astro-icon">🌇</span><div class="astro-label">日落</div><div class="astro-time">${sunset}</div></div>
-      <div class="astro-item"><span class="astro-icon">🌙</span><div class="astro-label">月出</div><div class="astro-time">${moonrise}</div></div>
-      <div class="astro-item"><span class="astro-icon">🌚</span><div class="astro-label">月落</div><div class="astro-time">${moonset}</div></div>
-    `;
   }
 
   function renderMinutely(data) {
