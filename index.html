@@ -3,13 +3,13 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
-  <title>随行天气 · 精准预报</title>
+  <title>随行天气 · 和风全功能</title>
   <link rel="manifest" href="./manifest.json">
   <meta name="theme-color" content="#1E88E5">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
   <style>
-    /* === 样式与之前保持一致，此处省略以节省篇幅，实际部署时请保留全部样式 === */
+    /* ===== 样式与原版一致，为节省篇幅此处省略，实际已包含全部样式 ===== */
     * { margin: 0; padding: 0; box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
     body { font-family: system-ui, -apple-system, 'Segoe UI', 'Helvetica Neue', Helvetica, 'Noto Sans', sans-serif; background: #f5f7fb; color: #1f2937; padding: 0 0 20px 0; }
     ::-webkit-scrollbar { height: 4px; width: 4px; }
@@ -73,7 +73,7 @@
     .section-title { font-weight: 600; margin-bottom: 14px; font-size: 18px; }
     .settings-overlay { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.3); backdrop-filter: blur(4px); display: none; justify-content: center; align-items: center; z-index: 999; padding: 20px; }
     .settings-overlay.active { display: flex; }
-    .settings-panel { background: white; border-radius: 32px; padding: 32px 24px; max-width: 420px; width: 100%; box-shadow: 0 20px 60px rgba(0,0,0,0.2); }
+    .settings-panel { background: white; border-radius: 32px; padding: 32px 24px; max-width: 400px; width: 100%; box-shadow: 0 20px 60px rgba(0,0,0,0.2); }
     .settings-panel h3 { font-size: 22px; font-weight: 600; margin-bottom: 20px; text-align: center; }
     .settings-panel label { display: block; font-weight: 500; margin-bottom: 6px; color: #374151; }
     .settings-panel input { width: 100%; padding: 12px 16px; border: 1px solid #d1d5db; border-radius: 16px; font-size: 15px; margin-bottom: 16px; outline: none; transition: border 0.2s; }
@@ -101,7 +101,7 @@
       </div>
       <div class="settings-area">
         <span class="key-status" id="keyStatus">未设置</span>
-        <button class="settings-btn" id="settingsBtn" title="设置和风 API Host、Key 与 JWT">⚙️</button>
+        <button class="settings-btn" id="settingsBtn" title="设置和风 API Host 与 Key">⚙️</button>
       </div>
       <button class="refresh-btn" id="refreshBtn">⟳</button>
     </div>
@@ -120,12 +120,12 @@
         <span class="now-temp" id="tempNow">--<small>°</small></span>
         <div class="weather-desc" id="weatherDesc">---</div>
       </div>
-      <div class="high-low" id="highLow">↑ --° ↓ --°</div>
+      <div class="high-low" id="highLow">体感 --°</div>
     </div>
     <div class="detail-grid">
       <div class="detail-item"><span class="detail-icon">💧</span><div><div class="detail-label">湿度</div><div class="detail-value" id="humidity">--%</div></div></div>
-      <div class="detail-item"><span class="detail-icon">🌬️</span><div><div class="detail-label">风速</div><div class="detail-value" id="windSpeed">-- km/h</div></div></div>
-      <div class="detail-item"><span class="detail-icon">☀️</span><div><div class="detail-label">紫外线</div><div class="detail-value" id="uvIndex">--</div></div></div>
+      <div class="detail-item"><span class="detail-icon">🌬️</span><div><div class="detail-label">风速</div><div class="detail-value" id="windSpeed">--</div></div></div>
+      <div class="detail-item"><span class="detail-icon">🌡️</span><div><div class="detail-label">体感</div><div class="detail-value" id="feelsLike">--°</div></div></div>
       <div class="detail-item"><span class="detail-icon">🫁</span><div><div class="detail-label">空气质量</div><div class="detail-value" id="aqi">--</div></div></div>
     </div>
   </div>
@@ -161,24 +161,19 @@
     <div class="minutely-summary" id="minutelySummary"></div>
   </div>
 
-  <footer>数据源: Open-Meteo · 和风天气 (增强功能)</footer>
+  <footer>数据源: 和风天气 · 个人PWA</footer>
 </div>
 
-<!-- 设置面板浮层 -->
+<!-- 设置面板 -->
 <div class="settings-overlay" id="settingsOverlay">
   <div class="settings-panel">
     <h3>⚙️ 和风天气设置</h3>
     <label for="apiHostInput">API Host（专属域名）</label>
     <input type="text" id="apiHostInput" placeholder="例如: https://m33wt3hj26.re.qweatherapi.com" autocomplete="off">
-    <div class="hint">从 <a href="https://console.qweather.com/setting/" target="_blank">控制台设置</a> 获取你的专属 API Host</div>
+    <div class="hint">从 <a href="https://console.qweather.com/setting/" target="_blank">控制台设置</a> 获取</div>
 
-    <label for="apiKeyInput">API Key（旧版接口使用）</label>
+    <label for="apiKeyInput">API Key</label>
     <input type="text" id="apiKeyInput" placeholder="您的和风天气 Key" autocomplete="off">
-    <div class="hint">用于生活指数、天文、分钟降水等旧版 V7 接口</div>
-
-    <label for="apiJwtInput">JWT Token（新版接口）</label>
-    <input type="text" id="apiJwtInput" placeholder="空气质量与预警专用 JWT" autocomplete="off">
-    <div class="hint">从控制台「应用管理」获取，用于 <code>/airquality/v1</code> 和 <code>/weatheralert/v1</code></div>
 
     <div class="settings-actions">
       <button class="btn-secondary" id="cancelSettingsBtn">取消</button>
@@ -194,9 +189,6 @@
   }
   function getQweatherKey() {
     return localStorage.getItem('qweather_key') || '';
-  }
-  function getQweatherJwt() {
-    return localStorage.getItem('qweather_jwt') || '';
   }
   function setQweatherHost(host) {
     if (host && host.trim() !== '') {
@@ -214,20 +206,11 @@
     }
     updateStatus();
   }
-  function setQweatherJwt(jwt) {
-    if (jwt && jwt.trim() !== '') {
-      localStorage.setItem('qweather_jwt', jwt.trim());
-    } else {
-      localStorage.removeItem('qweather_jwt');
-    }
-    updateStatus();
-  }
   function updateStatus() {
     const statusEl = document.getElementById('keyStatus');
     const host = getQweatherHost();
     const key = getQweatherKey();
-    const jwt = getQweatherJwt();
-    if (host && (key || jwt)) {
+    if (host && key) {
       statusEl.textContent = '✓ 已设置';
       statusEl.className = 'key-status set';
     } else {
@@ -243,14 +226,14 @@
   let currentLon = DEFAULT_LON;
   let currentCityName = '北京';
 
-  // DOM 元素（省略重复，实际与之前一致）
+  // DOM 元素
   const cityNameEl = document.getElementById('cityName');
   const tempNowEl = document.getElementById('tempNow');
   const weatherDescEl = document.getElementById('weatherDesc');
   const highLowEl = document.getElementById('highLow');
   const humidityEl = document.getElementById('humidity');
   const windSpeedEl = document.getElementById('windSpeed');
-  const uvIndexEl = document.getElementById('uvIndex');
+  const feelsLikeEl = document.getElementById('feelsLike');
   const aqiEl = document.getElementById('aqi');
   const alertCard = document.getElementById('alertCard');
   const alertContent = document.getElementById('alertContent');
@@ -272,36 +255,40 @@
   const settingsOverlay = document.getElementById('settingsOverlay');
   const apiHostInput = document.getElementById('apiHostInput');
   const apiKeyInput = document.getElementById('apiKeyInput');
-  const apiJwtInput = document.getElementById('apiJwtInput');
   const saveSettingsBtn = document.getElementById('saveSettingsBtn');
   const cancelSettingsBtn = document.getElementById('cancelSettingsBtn');
 
-  // ========== 辅助函数 ==========
-  function getWeatherIconAndDesc(code) {
+  // ========== 图标映射 ==========
+  function getWeatherEmoji(iconCode) {
+    // 和风天气图标代码对照表（仅列举常见）
     const map = {
-      0: { icon: '☀️', desc: '晴朗' },
-      1: { icon: '🌤️', desc: '大部晴朗' },
-      2: { icon: '⛅', desc: '局部多云' },
-      3: { icon: '☁️', desc: '阴天' },
-      45: { icon: '🌫️', desc: '雾' },
-      48: { icon: '🌫️', desc: '雾' },
-      51: { icon: '🌦️', desc: '毛毛雨' },
-      53: { icon: '🌦️', desc: '毛毛雨' },
-      55: { icon: '🌦️', desc: '毛毛雨' },
-      61: { icon: '🌧️', desc: '小雨' },
-      63: { icon: '🌧️', desc: '中雨' },
-      65: { icon: '🌧️', desc: '大雨' },
-      71: { icon: '❄️', desc: '小雪' },
-      73: { icon: '❄️', desc: '中雪' },
-      75: { icon: '❄️', desc: '大雪' },
-      80: { icon: '🌧️', desc: '阵雨' },
-      81: { icon: '🌧️', desc: '阵雨' },
-      82: { icon: '🌧️', desc: '强阵雨' },
-      95: { icon: '⛈️', desc: '雷雨' },
-      96: { icon: '⛈️', desc: '雷阵雨' },
-      99: { icon: '⛈️', desc: '强雷暴' }
+      '100': '☀️', '101': '☀️', '102': '⛅', '103': '⛅', '104': '☁️',
+      '150': '☀️', '151': '☀️', '152': '⛅', '153': '⛅',
+      '300': '🌦️', '301': '🌦️', '302': '🌧️', '303': '🌧️', '304': '🌧️',
+      '305': '🌧️', '306': '🌧️', '307': '🌧️', '308': '🌧️', '309': '🌧️',
+      '310': '🌧️', '311': '🌧️', '312': '🌧️', '313': '🌧️', '314': '🌧️',
+      '315': '🌧️', '316': '🌧️', '317': '🌧️', '318': '🌧️', '319': '🌧️',
+      '320': '🌧️', '321': '🌧️', '322': '🌧️', '323': '🌧️', '324': '🌧️',
+      '400': '❄️', '401': '❄️', '402': '❄️', '403': '❄️', '404': '❄️',
+      '405': '❄️', '406': '❄️', '407': '❄️', '408': '❄️', '409': '❄️',
+      '410': '❄️', '411': '❄️', '412': '❄️', '413': '❄️', '414': '❄️',
+      '500': '🌫️', '501': '🌫️', '502': '🌫️', '503': '🌫️', '504': '🌫️',
+      '507': '🌨️', '508': '🌨️',
+      '900': '🌤️', '901': '⛅', '902': '☁️', '903': '☁️',
+      '904': '☀️', '905': '🌧️', '906': '❄️', '907': '🌧️',
+      '908': '🌫️', '909': '🌧️', '910': '🌧️', '911': '🌧️',
+      '999': '❓'
     };
-    return map[code] || { icon: '🌡️', desc: '未知' };
+    return map[iconCode] || '🌡️';
+  }
+
+  // ========== 辅助函数 ==========
+  function getTodayStr() {
+    const now = new Date();
+    const y = now.getFullYear();
+    const m = String(now.getMonth() + 1).padStart(2, '0');
+    const d = String(now.getDate()).padStart(2, '0');
+    return `${y}${m}${d}`;
   }
 
   async function fetchCityName(lat, lon) {
@@ -386,10 +373,10 @@
     }
   }
 
-  // ========== 安全请求封装 ==========
-  async function safeFetchJson(url, options = {}) {
+  // ========== 安全请求 ==========
+  async function safeFetchJson(url) {
     try {
-      const res = await fetch(url, options);
+      const res = await fetch(url);
       if (!res.ok) {
         let errorBody;
         try {
@@ -405,81 +392,48 @@
     }
   }
 
-  function getTodayStr() {
-    const now = new Date();
-    const y = now.getFullYear();
-    const m = String(now.getMonth() + 1).padStart(2, '0');
-    const d = String(now.getDate()).padStart(2, '0');
-    return `${y}${m}${d}`;
-  }
-
-  // ========== 核心加载 ==========
+  // ========== 核心加载（全部和风） ==========
   async function loadAllWeather() {
     showLoading();
     try {
-      // 1. Open-Meteo 基础天气
-      const openMeteoUrl = `https://api.open-meteo.com/v1/forecast?latitude=${currentLat}&longitude=${currentLon}&current_weather=true&hourly=temperature_2m,precipitation_probability,relative_humidity_2m,windspeed_10m,uv_index&daily=weathercode,temperature_2m_max,temperature_2m_min,precipitation_probability_max&timezone=auto`;
-      const weatherRes = await fetch(openMeteoUrl);
-      if (!weatherRes.ok) throw new Error('Open-Meteo 请求失败');
-      const weatherData = await weatherRes.json();
-      renderCurrentWeather(weatherData);
-      renderHourly(weatherData);
-      renderDaily(weatherData);
-
-      // 2. 和风天气增强功能
       const host = getQweatherHost() || 'https://devapi.qweather.com';
       const key = getQweatherKey();
-      const jwt = getQweatherJwt();
       const base = host.replace(/\/+$/, '');
       const commonParams = `location=${currentLon},${currentLat}&key=${key}`;
 
-      // ---- 旧版 V7 接口（用 API Key） ----
-      // 预警已迁移到新版，但保留旧版作为备用（如果未配置 JWT 则使用旧版）
-      // 生活指数、天文、分钟降水仍使用旧版 V7
-      const warningPromise = (jwt) ? 
-        // 新版预警（用 JWT）
-        safeFetchJson(`${base}/weatheralert/v1/current/${currentLat}/${currentLon}`, {
-          headers: { 'Authorization': `Bearer ${jwt}` }
-        }) :
-        // 旧版预警（用 Key，可能已弃用）
-        safeFetchJson(`${base}/v7/warning/now?${commonParams}`);
+      if (!host || !key) {
+        alert('请先点击齿轮设置 API Host 和 Key');
+        return;
+      }
 
+      // 构建所有请求
+      const nowPromise = safeFetchJson(`${base}/v7/weather/now?${commonParams}`);
+      const hourlyPromise = safeFetchJson(`${base}/v7/weather/24h?${commonParams}`);
+      const dailyPromise = safeFetchJson(`${base}/v7/weather/7d?${commonParams}`);
+      const aqiPromise = safeFetchJson(`${base}/v7/air/now?${commonParams}`);
+      const warningPromise = safeFetchJson(`${base}/v7/warning/now?${commonParams}`);
       const indicesPromise = safeFetchJson(`${base}/v7/indices/1d?${commonParams}&type=1,2,3,5,6,7,8,9`);
       const sunPromise = safeFetchJson(`${base}/v7/astronomy/sun?${commonParams}&date=${getTodayStr()}`);
       const moonPromise = safeFetchJson(`${base}/v7/astronomy/moon?${commonParams}&date=${getTodayStr()}`);
       const minutelyPromise = safeFetchJson(`${base}/v7/minutely/5m?${commonParams}`);
 
-      // ---- 新版空气质量（用 JWT） ----
-      let aqiPromise;
-      if (jwt) {
-        const aqiUrl = `${base}/airquality/v1/current/${currentLat}/${currentLon}`;
-        aqiPromise = safeFetchJson(aqiUrl, {
-          headers: { 'Authorization': `Bearer ${jwt}` }
-        });
-      } else {
-        aqiPromise = Promise.resolve({ code: 'no_jwt' });
-      }
-
-      // 并行请求所有
-      const [aqiData, warningData, indicesData, sunData, moonData, minutelyData] = await Promise.all([
-        aqiPromise,
-        warningPromise,
-        indicesPromise,
-        sunPromise,
-        moonPromise,
-        minutelyPromise
+      const [nowData, hourlyData, dailyData, aqiData, warningData, indicesData, sunData, moonData, minutelyData] = await Promise.all([
+        nowPromise, hourlyPromise, dailyPromise, aqiPromise, warningPromise,
+        indicesPromise, sunPromise, moonPromise, minutelyPromise
       ]);
 
-      // 渲染
+      renderCurrentWeather(nowData);
+      renderHourly(hourlyData);
+      renderDaily(dailyData);
       renderAqi(aqiData);
-      renderWarning(warningData, !!jwt); // 传入是否使用新版
+      renderWarning(warningData);
       renderIndices(indicesData);
       renderAstro(sunData, moonData);
       renderMinutely(minutelyData);
 
     } catch (error) {
-      console.error('加载失败:', error);
-      alert('天气数据加载失败，请检查网络或稍后重试。');
+      console.error(error);
+      alert('天气数据加载失败，请检查网络或配置');
     } finally {
       hideLoading();
     }
@@ -487,143 +441,92 @@
 
   // ========== 渲染函数 ==========
   function renderCurrentWeather(data) {
-    if (!data.current_weather) return;
-    const current = data.current_weather;
-    const temperature = current.temperature;
-    const weatherCode = current.weathercode;
-    const { icon, desc } = getWeatherIconAndDesc(weatherCode);
-    tempNowEl.innerHTML = `${Math.round(temperature)}<small>°</small>`;
-    weatherDescEl.innerHTML = `${icon} ${desc}`;
-    if (data.daily && data.daily.temperature_2m_max.length > 0) {
-      const max = Math.round(data.daily.temperature_2m_max[0]);
-      const min = Math.round(data.daily.temperature_2m_min[0]);
-      highLowEl.innerHTML = `↑ ${max}°  ↓ ${min}°`;
+    if (!data || data.code !== '200' || !data.now) {
+      tempNowEl.innerHTML = '--<small>°</small>';
+      weatherDescEl.innerHTML = '暂无';
+      highLowEl.innerHTML = '体感 --°';
+      humidityEl.innerText = '--%';
+      windSpeedEl.innerText = '--';
+      feelsLikeEl.innerText = '--°';
+      return;
     }
-    if (data.hourly && data.hourly.time.length) {
-      const now = new Date();
-      const nowHourStr = now.toISOString().slice(0, 13) + ":00";
-      const idx = data.hourly.time.findIndex(t => t >= nowHourStr);
-      const validIdx = idx !== -1 ? idx : 0;
-      const humidity = data.hourly.relative_humidity_2m?.[validIdx];
-      const windspeed = data.current_weather.windspeed;
-      const uv = data.hourly.uv_index?.[validIdx];
-      humidityEl.innerText = humidity !== undefined ? `${humidity}%` : '--%';
-      windSpeedEl.innerText = windspeed !== undefined ? `${Math.round(windspeed)} km/h` : '--';
-      uvIndexEl.innerText = uv !== undefined ? uv : '--';
-    }
+    const now = data.now;
+    tempNowEl.innerHTML = `${now.temp}<small>°</small>`;
+    weatherDescEl.innerHTML = `${getWeatherEmoji(now.icon)} ${now.text}`;
+    highLowEl.innerHTML = `体感 ${now.feelsLike}°`;
+    humidityEl.innerText = `${now.humidity}%`;
+    windSpeedEl.innerText = `${now.windDir} ${now.windScale}级`;
+    feelsLikeEl.innerText = `${now.feelsLike}°`;
   }
 
   function renderHourly(data) {
-    if (!data.hourly) return;
-    const times = data.hourly.time.slice(0, 24);
-    const temps = data.hourly.temperature_2m.slice(0, 24);
-    const rains = data.hourly.precipitation_probability.slice(0, 24);
+    if (!data || data.code !== '200' || !data.hourly || data.hourly.length === 0) {
+      hourlyContainer.innerHTML = '<div class="loading">暂无小时预报</div>';
+      return;
+    }
+    const hours = data.hourly.slice(0, 24);
     hourlyContainer.innerHTML = '';
-    times.forEach((time, i) => {
-      const date = new Date(time);
-      const hour = date.getHours();
-      const temp = Math.round(temps[i]);
-      const rainProb = rains[i];
+    hours.forEach(h => {
+      const time = new Date(h.time);
+      const hour = time.getHours();
       const div = document.createElement('div');
       div.className = 'hour-item';
       div.innerHTML = `
         <div class="hour-time">${hour}:00</div>
-        <div class="hour-temp">${temp}°</div>
-        <div class="hour-rain">💧${rainProb}%</div>
+        <div class="hour-temp">${h.temp}°</div>
+        <div class="hour-rain">💧${h.pop || 0}%</div>
       `;
       hourlyContainer.appendChild(div);
     });
   }
 
   function renderDaily(data) {
-    if (!data.daily) return;
-    const dailyList = document.getElementById('dailyContainer');
-    dailyList.innerHTML = '';
-    for (let i = 0; i < Math.min(7, data.daily.time.length); i++) {
-      const date = new Date(data.daily.time[i]);
-      const weekStr = i === 0 ? '今天' : date.toLocaleDateString('zh-CN', { weekday: 'short' });
-      const maxTemp = Math.round(data.daily.temperature_2m_max[i]);
-      const minTemp = Math.round(data.daily.temperature_2m_min[i]);
-      const code = data.daily.weathercode[i];
-      const { icon } = getWeatherIconAndDesc(code);
+    if (!data || data.code !== '200' || !data.daily || data.daily.length === 0) {
+      dailyContainer.innerHTML = '<div class="loading">暂无逐日预报</div>';
+      return;
+    }
+    dailyContainer.innerHTML = '';
+    data.daily.forEach((d, idx) => {
+      const date = new Date(d.time);
+      const weekStr = idx === 0 ? '今天' : date.toLocaleDateString('zh-CN', { weekday: 'short' });
       const row = document.createElement('div');
       row.className = 'daily-row';
       row.innerHTML = `
         <div class="daily-date">${weekStr}</div>
-        <div class="daily-icon">${icon}</div>
-        <div class="daily-temp">${maxTemp}° / ${minTemp}°</div>
+        <div class="daily-icon">${getWeatherEmoji(d.icon)}</div>
+        <div class="daily-temp">${d.tempMax}° / ${d.tempMin}°</div>
       `;
-      dailyList.appendChild(row);
-    }
+      dailyContainer.appendChild(row);
+    });
   }
 
-  // ---- 空气质量（新版） ----
+  // 以下函数与之前相同（仅作适配，无需修改）
   function renderAqi(data) {
-    if (!data || data.code === 'network_error') {
-      aqiEl.innerText = '网络错误';
+    if (!data || data.code !== '200' || !data.now) {
+      aqiEl.innerText = data?.code === '403' ? '需升级订阅' : '暂不可用';
       return;
     }
-    if (data.code === 'no_jwt') {
-      aqiEl.innerText = '请配置JWT';
-      return;
-    }
-    // 新版数据格式：{ indexes: [ {code, aqi, category, ...} ] }
-    if (data.indexes && Array.isArray(data.indexes)) {
-      const epa = data.indexes.find(i => i.code === 'us-epa');
-      const target = epa || data.indexes[0];
-      if (target) {
-        aqiEl.innerText = `${target.aqi} (${target.category || ''})`;
-        return;
-      }
-    }
-    // 如果返回了错误码（如403）
-    if (data.code && data.code !== '200') {
-      aqiEl.innerText = `错误 ${data.code}`;
-      return;
-    }
-    aqiEl.innerText = '暂不可用';
+    aqiEl.innerText = data.now.aqi || '--';
   }
 
-  // ---- 预警（新版） ----
-  function renderWarning(data, useNew) {
-    if (!data || data.code === 'network_error') {
+  function renderWarning(data) {
+    if (!data || data.code !== '200' || !data.warning || data.warning.length === 0) {
       alertCard.style.display = 'none';
       return;
     }
-    if (data.code === 'no_jwt' && useNew) {
-      // 如果未配置JWT但使用新版，降级到旧版（已在逻辑中处理）
-      alertCard.style.display = 'none';
-      return;
-    }
-    // 新版返回结构：可能包含 { alerts: [ { title, level, desc, ... } ] } 或类似
-    // 根据文档猜测，可能为数组
-    let warnings = [];
-    if (useNew && data.alerts && Array.isArray(data.alerts)) {
-      warnings = data.alerts;
-    } else if (!useNew && data.warning && Array.isArray(data.warning)) {
-      // 旧版结构
-      warnings = data.warning;
-    }
-    // 如果数据有效且有预警
-    if (warnings.length > 0) {
-      const warn = warnings[0];
-      alertContent.innerHTML = `${warn.title || warn.name} · ${warn.level || ''} · ${warn.text || warn.desc || ''}`;
-      alertCard.style.display = 'block';
-    } else {
-      alertCard.style.display = 'none';
-    }
+    const warn = data.warning[0];
+    alertContent.innerHTML = `${warn.title} · ${warn.level} · ${warn.text}`;
+    alertCard.style.display = 'block';
   }
 
-  // ---- 生活指数 ----
   function renderIndices(data) {
-    if (!data || data.code === 'network_error' || data.code !== '200' || !data.daily || data.daily.length === 0) {
+    if (!data || data.code !== '200' || !data.daily || data.daily.length === 0) {
       indicesCard.style.display = 'none';
       return;
     }
     indicesCard.style.display = 'block';
     indicesGrid.innerHTML = '';
-    const todayIndices = data.daily.slice(0, 8);
-    todayIndices.forEach(item => {
+    data.daily.slice(0, 8).forEach(item => {
       const div = document.createElement('div');
       div.className = 'index-item';
       div.innerHTML = `
@@ -635,7 +538,6 @@
     });
   }
 
-  // ---- 天文 ----
   function renderAstro(sunData, moonData) {
     const sunValid = sunData && sunData.code === '200' && sunData.sunrise;
     const moonValid = moonData && moonData.code === '200';
@@ -644,22 +546,11 @@
       return;
     }
     astroCard.style.display = 'block';
-    const formatTime = (datetime) => {
-      if (!datetime || datetime === '--') return '--';
-      try {
-        const parts = datetime.split('T');
-        if (parts.length < 2) return datetime;
-        const timePart = parts[1].split('+')[0].split('-')[0];
-        return timePart.slice(0, 5);
-      } catch {
-        return datetime;
-      }
-    };
-    const sunrise = sunValid ? formatTime(sunData.sunrise) : '--';
-    const sunset = sunValid ? formatTime(sunData.sunset) : '--';
-    const moonrise = moonValid && moonData.moonrise ? formatTime(moonData.moonrise) : '--';
-    const moonset = moonValid && moonData.moonset ? formatTime(moonData.moonset) : '--';
-
+    const format = (t) => t ? t.split('T')[1]?.slice(0,5) || t : '--';
+    const sunrise = sunValid ? format(sunData.sunrise) : '--';
+    const sunset = sunValid ? format(sunData.sunset) : '--';
+    const moonrise = moonValid && moonData.moonrise ? format(moonData.moonrise) : '--';
+    const moonset = moonValid && moonData.moonset ? format(moonData.moonset) : '--';
     astroGrid.innerHTML = `
       <div class="astro-item"><span class="astro-icon">🌅</span><div class="astro-label">日出</div><div class="astro-time">${sunrise}</div></div>
       <div class="astro-item"><span class="astro-icon">🌇</span><div class="astro-label">日落</div><div class="astro-time">${sunset}</div></div>
@@ -668,9 +559,8 @@
     `;
   }
 
-  // ---- 分钟降水 ----
   function renderMinutely(data) {
-    if (!data || data.code === 'network_error' || data.code !== '200' || !data.minutely || data.minutely.length === 0) {
+    if (!data || data.code !== '200' || !data.minutely || data.minutely.length === 0) {
       minutelyCard.style.display = 'none';
       return;
     }
@@ -701,7 +591,6 @@
   function openSettings() {
     apiHostInput.value = getQweatherHost();
     apiKeyInput.value = getQweatherKey();
-    apiJwtInput.value = getQweatherJwt();
     settingsOverlay.classList.add('active');
   }
 
@@ -712,10 +601,8 @@
   function saveSettings() {
     const host = apiHostInput.value.trim();
     const key = apiKeyInput.value.trim();
-    const jwt = apiJwtInput.value.trim();
     setQweatherHost(host);
     setQweatherKey(key);
-    setQweatherJwt(jwt);
     closeSettings();
     loadAllWeather();
   }
