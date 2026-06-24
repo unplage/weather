@@ -325,48 +325,35 @@
   async function searchCity(query) {
       if (!query) return;
   
-      // 从 localStorage 获取用户设置的 Host 和 Key
       const host = getQweatherHost() || 'https://devapi.qweather.com';
       const key = getQweatherKey();
       const base = host.replace(/\/+$/, '');
   
-      // 检查是否已设置 Key
       if (!key) {
           alert('请先在设置中配置您的和风天气 API Key，才能使用城市搜索功能。');
           return;
       }
   
-      // 构建和风天气 GeoAPI 的 URL
-      // 注意：使用 location 参数传递城市名，并增加 number=10 以获取更多结果
-      const url = `${base}/v2/city/lookup?location=${encodeURIComponent(query)}&number=10&key=${key}`;
+      // ✅ 正确：使用你的专属 API Host + /geo/v2/city/lookup
+      const url = `${base}/geo/v2/city/lookup?location=${encodeURIComponent(query)}&number=10&key=${key}`;
   
       try {
           const response = await fetch(url);
           const data = await response.json();
   
-          // 检查 API 返回的状态码
           if (data.code === '200' && data.location && data.location.length > 0) {
-              // 取第一个结果（通常是最匹配的）
               const firstResult = data.location[0];
               currentLat = firstResult.lat;
               currentLon = firstResult.lon;
-              // 使用返回的本地化名称
-              currentCityName = firstResult.name; 
-              
-              // 更新界面
+              currentCityName = firstResult.name;
               cityNameEl.innerText = currentCityName;
-              
-              // 保存到本地存储
-              localStorage.setItem('lastCity', JSON.stringify({ 
-                  lat: currentLat, 
-                  lon: currentLon, 
-                  name: currentCityName 
+              localStorage.setItem('lastCity', JSON.stringify({
+                  lat: currentLat,
+                  lon: currentLon,
+                  name: currentCityName
               }));
-              
-              // 加载天气数据
               loadAllWeather();
           } else {
-              // 如果没找到结果，给出更友好的提示
               alert(`未找到名为“${query}”的城市。请尝试输入更具体的名称，或使用拼音（如 Xuchang）。`);
           }
       } catch (error) {
