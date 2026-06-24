@@ -437,7 +437,10 @@
       const nowPromise = safeFetchJson(`${base}/v7/weather/now?${commonParams}`);
       const hourlyPromise = safeFetchJson(`${base}/v7/weather/24h?${commonParams}`);
       const dailyPromise = safeFetchJson(`${base}/v7/weather/7d?${commonParams}`);
-      const aqiPromise = safeFetchJson(`${base}/v7/air/now?${commonParams}`);
+      //const aqiPromise = safeFetchJson(`${base}/v7/air/now?${commonParams}`);
+	  // 直接在 URL 中传递 key 参数
+      const aqiUrl = `${base}/airquality/v1/current/${currentLat}/${currentLon}?key=${key}`;
+      const aqiPromise = fetch(aqiUrl).then(res => res.json());
       const warningPromise = safeFetchJson(`${base}/v7/warning/now?${commonParams}`);
       const indicesPromise = safeFetchJson(`${base}/v7/indices/1d?${commonParams}&type=1,2,3,5,6,7,8,9`);
       const minutelyPromise = safeFetchJson(`${base}/v7/minutely/5m?${commonParams}`);
