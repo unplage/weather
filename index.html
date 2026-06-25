@@ -9,8 +9,8 @@
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
 
-  <!-- 加载和风天气图标库（使用稳定 CDN） -->
-  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@qweather/icons@1.0.0/font/qweather-icons.css">
+  <!-- 和风天气图标库（官方正确CDN） -->
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/qweather-icons@1.8.0/font/qweather-icons.css">
 
   <style>
     /* ===== 基础样式 ===== */
@@ -33,7 +33,7 @@
     .now-temp { font-size: 64px; font-weight: 700; }
     .now-temp small { font-size: 24px; font-weight: 400; }
     .weather-desc { font-size: 20px; color: #4b5563; display: flex; align-items: center; gap: 8px; }
-    .weather-desc .qi { font-size: 32px; }  /* 图标字体大小 */
+    .weather-desc .qi { font-size: 32px; }
     .high-low { font-size: 18px; color: #6c757d; }
     .detail-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; margin-top: 16px; padding-top: 16px; border-top: 1px solid #edf2f7; }
     .detail-item { display: flex; align-items: center; gap: 12px; }
@@ -87,12 +87,6 @@
     .btn-secondary:active { transform: scale(0.96); background: #e5e7eb; }
     .hint { font-size: 12px; color: #6b7280; margin-top: -12px; margin-bottom: 12px; }
     .hint code { background: #f1f5f9; padding: 2px 8px; border-radius: 4px; font-size: 12px; }
-
-    /* 备用 Emoji 样式（当图标库未加载时使用） */
-    .weather-icon-fallback {
-      font-size: 28px;
-      line-height: 1;
-    }
   </style>
 </head>
 <body>
@@ -257,61 +251,11 @@
   const saveSettingsBtn = document.getElementById('saveSettingsBtn');
   const cancelSettingsBtn = document.getElementById('cancelSettingsBtn');
 
-  // ========== 图标生成（智能降级） ==========
-  // 检测图标库是否加载成功
-  let iconLibraryLoaded = false;
-
-  // 检测方法：在页面加载后检查是否存在 .qi-100 样式
-  function checkIconLibrary() {
-    // 创建一个临时元素测试
-    const testEl = document.createElement('i');
-    testEl.className = 'qi-100';
-    testEl.style.display = 'none';
-    document.body.appendChild(testEl);
-    const computed = window.getComputedStyle(testEl);
-    // 如果字体家族包含 'qweather-icons' 或字体不为空，则判断加载成功
-    const fontFamily = computed.fontFamily || '';
-    iconLibraryLoaded = fontFamily.includes('qweather-icons') || fontFamily.includes('QWeather');
-    document.body.removeChild(testEl);
-    return iconLibraryLoaded;
-  }
-
-  // 等待页面加载完成后检测
-  document.addEventListener('DOMContentLoaded', () => {
-    // 延迟检测，确保字体已应用
-    setTimeout(() => {
-      checkIconLibrary();
-    }, 500);
-  });
-
-  // 图标生成函数
+  // ========== 图标生成（直接使用图标字体） ==========
   function getWeatherIcon(iconCode) {
     if (!iconCode) return '🌡️';
-    // 如果图标库已加载，使用 <i> 标签
-    if (iconLibraryLoaded) {
-      return `<i class="qi-${iconCode}"></i>`;
-    }
-    // 否则使用 Emoji 回退
-    // 为了更好的体验，我们使用一个简单的映射
-    const emojiMap = {
-      '100': '☀️', '101': '☀️', '102': '⛅', '103': '⛅', '104': '☁️',
-      '150': '☀️', '151': '☀️', '152': '⛅', '153': '⛅',
-      '300': '🌦️', '301': '🌦️', '302': '⛈️', '303': '⛈️', '304': '⛈️',
-      '305': '🌦️', '306': '🌧️', '307': '🌧️', '308': '🌧️', '309': '🌦️',
-      '310': '🌧️', '311': '🌧️', '312': '🌧️', '313': '🌧️', '314': '🌧️',
-      '315': '🌧️', '316': '🌧️', '317': '🌧️', '318': '🌧️', '319': '🌧️',
-      '320': '🌨️', '321': '🌨️', '322': '❄️', '323': '❄️', '324': '❄️',
-      '400': '🌨️', '401': '❄️', '402': '❄️', '403': '❄️', '404': '🌨️',
-      '405': '🌨️', '406': '🌨️', '407': '🌨️', '408': '🌨️', '409': '🌨️',
-      '410': '❄️', '411': '❄️', '412': '❄️', '413': '❄️', '414': '❄️',
-      '500': '🌫️', '501': '🌫️', '502': '🌫️', '503': '🌫️', '504': '🌫️',
-      '507': '🌪️', '508': '🌪️',
-      '900': '🌤️', '901': '⛅', '902': '☁️', '903': '☁️',
-      '904': '☀️', '905': '🌧️', '906': '❄️', '907': '🌧️',
-      '908': '🌫️', '909': '🌧️', '910': '🌧️', '911': '🌧️',
-      '999': '❓'
-    };
-    return `<span class="weather-icon-fallback">${emojiMap[iconCode] || '🌡️'}</span>`;
+    // 直接返回和风图标字体标签
+    return `<i class="qi-${iconCode}"></i>`;
   }
 
   // ========== 辅助函数 ==========
@@ -717,20 +661,6 @@
         .catch(err => console.log('SW failed', err));
     }
   }
-
-  // 二次检测图标库（页面完全加载后）
-  window.addEventListener('load', () => {
-    setTimeout(() => {
-      const loaded = checkIconLibrary();
-      if (!loaded) {
-        console.warn('和风天气图标库未加载，使用 Emoji 代替');
-        // 重新渲染已显示的图标（如果需要）
-        // 由于图标是动态生成的，这里只做标记，后续 getWeatherIcon 会使用 Emoji
-        // 但已渲染的需刷新，简单做法：重新加载天气
-        // 为了避免闪烁，不自动刷新，用户可手动刷新
-      }
-    }, 1000);
-  });
 
   init();
 </script>
