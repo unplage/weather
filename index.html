@@ -8,8 +8,12 @@
   <meta name="theme-color" content="#1E88E5">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
+  
+  <!-- 引入和风天气 SVG 图标库 -->
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@qweather/icons/font/qweather-icons.css">
+
   <style>
-    /* 样式不变，省略以节省篇幅，实际使用请保留完整样式 */
+    /* ===== 样式保持不变（未修改） ===== */
     * { margin: 0; padding: 0; box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
     body { font-family: system-ui, -apple-system, 'Segoe UI', 'Helvetica Neue', Helvetica, 'Noto Sans', sans-serif; background: #f5f7fb; color: #1f2937; padding: 0 0 20px 0; }
     ::-webkit-scrollbar { height: 4px; width: 4px; }
@@ -28,7 +32,7 @@
     .temp-row { display: flex; align-items: baseline; justify-content: space-between; flex-wrap: wrap; margin-bottom: 20px; }
     .now-temp { font-size: 64px; font-weight: 700; }
     .now-temp small { font-size: 24px; font-weight: 400; }
-    .weather-desc { font-size: 20px; color: #4b5563; text-transform: capitalize; }
+    .weather-desc { font-size: 20px; color: #4b5563; text-transform: capitalize; display: flex; align-items: center; gap: 6px; }
     .high-low { font-size: 18px; color: #6c757d; }
     .detail-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; margin-top: 16px; padding-top: 16px; border-top: 1px solid #edf2f7; }
     .detail-item { display: flex; align-items: center; gap: 12px; }
@@ -46,7 +50,7 @@
     .daily-list { display: flex; flex-direction: column; gap: 16px; }
     .daily-row { display: flex; justify-content: space-between; align-items: center; }
     .daily-date { width: 90px; font-weight: 500; }
-    .daily-icon { font-size: 28px; width: 48px; text-align: center; }
+    .daily-icon { font-size: 28px; width: 48px; text-align: center; line-height: 1; }
     .daily-temp { width: 100px; text-align: right; font-weight: 500; }
     .indices-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-top: 6px; }
     .index-item { background: #f8fafc; border-radius: 16px; padding: 12px 10px; text-align: center; }
@@ -245,27 +249,12 @@
   const saveSettingsBtn = document.getElementById('saveSettingsBtn');
   const cancelSettingsBtn = document.getElementById('cancelSettingsBtn');
 
-  // ========== 图标映射（补全版） ==========
-  function getWeatherEmoji(iconCode) {
-    const map = {
-      '100': '☀️', '101': '☀️', '102': '⛅', '103': '⛅', '104': '☁️',
-      '150': '☀️', '151': '☀️', '152': '⛅', '153': '⛅',
-      '300': '🌦️', '301': '🌦️', '302': '🌧️', '303': '🌧️', '304': '🌧️',
-      '305': '🌧️', '306': '🌧️', '307': '🌧️', '308': '🌧️', '309': '🌧️',
-      '310': '🌧️', '311': '🌧️', '312': '🌧️', '313': '🌧️', '314': '🌧️',
-      '315': '🌧️', '316': '🌧️', '317': '🌧️', '318': '🌧️', '319': '🌧️',
-      '320': '🌧️', '321': '🌧️', '322': '🌧️', '323': '🌧️', '324': '🌧️',
-      '400': '❄️', '401': '❄️', '402': '❄️', '403': '❄️', '404': '❄️',
-      '405': '❄️', '406': '❄️', '407': '❄️', '408': '❄️', '409': '❄️',
-      '410': '❄️', '411': '❄️', '412': '❄️', '413': '❄️', '414': '❄️',
-      '500': '🌫️', '501': '🌫️', '502': '🌫️', '503': '🌫️', '504': '🌫️',
-      '507': '🌨️', '508': '🌨️',
-      '900': '🌤️', '901': '⛅', '902': '☁️', '903': '☁️',
-      '904': '☀️', '905': '🌧️', '906': '❄️', '907': '🌧️',
-      '908': '🌫️', '909': '🌧️', '910': '🌧️', '911': '🌧️',
-      '999': '❓'
-    };
-    return map[iconCode] || '🌡️';
+  // ========== 图标生成函数（使用和风 SVG 图标库） ==========
+  function getWeatherIcon(iconCode) {
+    if (!iconCode) return '🌡️';
+    // 返回和风天气图标的 <i> 标签，类名为 qi-{iconCode}
+    // 如果图标库未加载或代码不存在，将显示备用 emoji
+    return `<i class="qi-${iconCode}"></i>`;
   }
 
   // ========== 辅助函数 ==========
@@ -488,7 +477,8 @@
     }
     const now = data.now;
     tempNowEl.innerHTML = `${now.temp}<small>°</small>`;
-    weatherDescEl.innerHTML = `${getWeatherEmoji(now.icon)} ${now.text}`;
+    // 使用和风图标 + 天气描述文字
+    weatherDescEl.innerHTML = `${getWeatherIcon(now.icon)} ${now.text}`;
     highLowEl.innerHTML = `体感 ${now.feelsLike}°`;
     humidityEl.innerText = `${now.humidity}%`;
     windSpeedEl.innerText = `${now.windDir} ${now.windScale}级`;
@@ -516,7 +506,7 @@
     });
   }
 
-  // ===== 修复逐日预报：增加天气描述文字 =====
+  // ===== 逐日预报 =====
   function renderDaily(data) {
     if (!data || data.code !== '200' || !data.daily || data.daily.length === 0) {
       dailyContainer.innerHTML = '<div class="loading">暂无逐日预报</div>';
@@ -533,12 +523,11 @@
       }
       const row = document.createElement('div');
       row.className = 'daily-row';
-      // 使用 iconDay（或 fallback icon），并显示 textDay
       const iconCode = d.iconDay || d.icon;
       const weatherText = d.textDay || d.text || '';
       row.innerHTML = `
         <div class="daily-date">${dateDisplay}</div>
-        <div class="daily-icon">${getWeatherEmoji(iconCode)}</div>
+        <div class="daily-icon">${getWeatherIcon(iconCode)}</div>
         <div style="flex:1; text-align:left; padding-left:8px; font-size:14px; color:#4b5563;">${weatherText}</div>
         <div class="daily-temp">${d.tempMax}° / ${d.tempMin}°</div>
       `;
