@@ -8,12 +8,7 @@
   <meta name="theme-color" content="#1E88E5">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
-  
-  <!-- 引入和风天气 SVG 图标库 -->
-  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@qweather/icons/font/qweather-icons.css">
-
   <style>
-    /* ===== 样式保持不变（未修改） ===== */
     * { margin: 0; padding: 0; box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
     body { font-family: system-ui, -apple-system, 'Segoe UI', 'Helvetica Neue', Helvetica, 'Noto Sans', sans-serif; background: #f5f7fb; color: #1f2937; padding: 0 0 20px 0; }
     ::-webkit-scrollbar { height: 4px; width: 4px; }
@@ -32,7 +27,7 @@
     .temp-row { display: flex; align-items: baseline; justify-content: space-between; flex-wrap: wrap; margin-bottom: 20px; }
     .now-temp { font-size: 64px; font-weight: 700; }
     .now-temp small { font-size: 24px; font-weight: 400; }
-    .weather-desc { font-size: 20px; color: #4b5563; text-transform: capitalize; display: flex; align-items: center; gap: 6px; }
+    .weather-desc { font-size: 20px; color: #4b5563; display: flex; align-items: center; gap: 8px; }
     .high-low { font-size: 18px; color: #6c757d; }
     .detail-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; margin-top: 16px; padding-top: 16px; border-top: 1px solid #edf2f7; }
     .detail-item { display: flex; align-items: center; gap: 12px; }
@@ -50,7 +45,7 @@
     .daily-list { display: flex; flex-direction: column; gap: 16px; }
     .daily-row { display: flex; justify-content: space-between; align-items: center; }
     .daily-date { width: 90px; font-weight: 500; }
-    .daily-icon { font-size: 28px; width: 48px; text-align: center; line-height: 1; }
+    .daily-icon { width: 48px; text-align: center; line-height: 1; font-size: 0; }
     .daily-temp { width: 100px; text-align: right; font-weight: 500; }
     .indices-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-top: 6px; }
     .index-item { background: #f8fafc; border-radius: 16px; padding: 12px 10px; text-align: center; }
@@ -249,12 +244,10 @@
   const saveSettingsBtn = document.getElementById('saveSettingsBtn');
   const cancelSettingsBtn = document.getElementById('cancelSettingsBtn');
 
-  // ========== 图标生成函数（使用和风 SVG 图标库） ==========
+  // ========== 图标生成函数（使用和风 SVG 图片） ==========
   function getWeatherIcon(iconCode) {
     if (!iconCode) return '🌡️';
-    // 返回和风天气图标的 <i> 标签，类名为 qi-{iconCode}
-    // 如果图标库未加载或代码不存在，将显示备用 emoji
-    return `<i class="qi-${iconCode}"></i>`;
+    return `<img src="https://icons.qweather.com/icon/${iconCode}.svg" alt="${iconCode}" style="width:28px; height:28px; vertical-align:middle; display:inline-block;" />`;
   }
 
   // ========== 辅助函数 ==========
@@ -310,45 +303,39 @@
     }
   }
 
-  // ========== 搜索城市（使用和风天气 GeoAPI）==========
+  // ========== 搜索城市 ==========
   async function searchCity(query) {
-      if (!query) return;
-  
-      const host = getQweatherHost() || 'https://devapi.qweather.com';
-      const key = getQweatherKey();
-      const base = host.replace(/\/+$/, '');
-  
-      if (!key) {
-          alert('请先在设置中配置您的和风天气 API Key，才能使用城市搜索功能。');
-          return;
+    if (!query) return;
+    const host = getQweatherHost() || 'https://devapi.qweather.com';
+    const key = getQweatherKey();
+    const base = host.replace(/\/+$/, '');
+    if (!key) {
+      alert('请先在设置中配置您的和风天气 API Key，才能使用城市搜索功能。');
+      return;
+    }
+    const url = `${base}/geo/v2/city/lookup?location=${encodeURIComponent(query)}&number=10&key=${key}`;
+    try {
+      const response = await fetch(url);
+      const data = await response.json();
+      if (data.code === '200' && data.location && data.location.length > 0) {
+        const firstResult = data.location[0];
+        currentLat = firstResult.lat;
+        currentLon = firstResult.lon;
+        currentCityName = firstResult.name;
+        cityNameEl.innerText = currentCityName;
+        localStorage.setItem('lastCity', JSON.stringify({
+          lat: currentLat,
+          lon: currentLon,
+          name: currentCityName
+        }));
+        loadAllWeather();
+      } else {
+        alert(`未找到名为“${query}”的城市。请尝试输入更具体的名称，或使用拼音（如 Xuchang）。`);
       }
-  
-      // ✅ 正确：使用你的专属 API Host + /geo/v2/city/lookup
-      const url = `${base}/geo/v2/city/lookup?location=${encodeURIComponent(query)}&number=10&key=${key}`;
-  
-      try {
-          const response = await fetch(url);
-          const data = await response.json();
-  
-          if (data.code === '200' && data.location && data.location.length > 0) {
-              const firstResult = data.location[0];
-              currentLat = firstResult.lat;
-              currentLon = firstResult.lon;
-              currentCityName = firstResult.name;
-              cityNameEl.innerText = currentCityName;
-              localStorage.setItem('lastCity', JSON.stringify({
-                  lat: currentLat,
-                  lon: currentLon,
-                  name: currentCityName
-              }));
-              loadAllWeather();
-          } else {
-              alert(`未找到名为“${query}”的城市。请尝试输入更具体的名称，或使用拼音（如 Xuchang）。`);
-          }
-      } catch (error) {
-          console.error('城市搜索失败:', error);
-          alert('城市搜索失败，请检查网络连接或稍后再试。');
-      }
+    } catch (error) {
+      console.error('城市搜索失败:', error);
+      alert('城市搜索失败，请检查网络连接或稍后再试。');
+    }
   }
 
   function getCurrentPosition() {
@@ -477,7 +464,6 @@
     }
     const now = data.now;
     tempNowEl.innerHTML = `${now.temp}<small>°</small>`;
-    // 使用和风图标 + 天气描述文字
     weatherDescEl.innerHTML = `${getWeatherIcon(now.icon)} ${now.text}`;
     highLowEl.innerHTML = `体感 ${now.feelsLike}°`;
     humidityEl.innerText = `${now.humidity}%`;
@@ -506,7 +492,6 @@
     });
   }
 
-  // ===== 逐日预报 =====
   function renderDaily(data) {
     if (!data || data.code !== '200' || !data.daily || data.daily.length === 0) {
       dailyContainer.innerHTML = '<div class="loading">暂无逐日预报</div>';
