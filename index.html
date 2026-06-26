@@ -13,7 +13,7 @@
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/qweather-icons@1.8.0/font/qweather-icons.css">
 
   <style>
-    /* ===== 基础样式 ===== */
+    /* ===== 基础样式（与之前完全相同） ===== */
     * { margin: 0; padding: 0; box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
     body { font-family: system-ui, -apple-system, 'Segoe UI', 'Helvetica Neue', Helvetica, 'Noto Sans', sans-serif; background: #f5f7fb; color: #1f2937; padding: 0 0 20px 0; }
     ::-webkit-scrollbar { height: 4px; width: 4px; }
@@ -220,6 +220,7 @@
   let currentLat = DEFAULT_LAT;
   let currentLon = DEFAULT_LON;
   let currentCityName = '北京';
+  let weatherLoaded = false; // 标记是否已加载天气（定位成功或手动搜索）
 
   // DOM 元素
   const cityNameEl = document.getElementById('cityName');
@@ -251,10 +252,9 @@
   const saveSettingsBtn = document.getElementById('saveSettingsBtn');
   const cancelSettingsBtn = document.getElementById('cancelSettingsBtn');
 
-  // ========== 图标生成（直接使用图标字体） ==========
+  // ========== 图标生成 ==========
   function getWeatherIcon(iconCode) {
     if (!iconCode) return '🌡️';
-    // 直接返回和风图标字体标签
     return `<i class="qi-${iconCode}"></i>`;
   }
 
@@ -311,88 +311,72 @@
     }
   }
 
-  // ========== 搜索城市（使用和风天气 GeoAPI）==========
+  // ========== 搜索城市 ==========
   async function searchCity(query) {
-      if (!query) return;
-      const host = getQweatherHost() || 'https://devapi.qweather.com';
-      const key = getQweatherKey();
-      const base = host.replace(/\/+$/, '');
-      if (!key) {
-          alert('请先在设置中配置您的和风天气 API Key，才能使用城市搜索功能。');
-          return;
+    if (!query) return;
+    const host = getQweatherHost() || 'https://devapi.qweather.com';
+    const key = getQweatherKey();
+    const base = host.replace(/\/+$/, '');
+    if (!key) {
+      alert('请先在设置中配置您的和风天气 API Key，才能使用城市搜索功能。');
+      return;
+    }
+    const url = `${base}/geo/v2/city/lookup?location=${encodeURIComponent(query)}&number=10&key=${key}`;
+    try {
+      const response = await fetch(url);
+      const data = await response.json();
+      if (data.code === '200' && data.location && data.location.length > 0) {
+        const firstResult = data.location[0];
+        currentLat = firstResult.lat;
+        currentLon = firstResult.lon;
+        currentCityName = firstResult.name;
+        cityNameEl.innerText = currentCityName;
+        weatherLoaded = true;
+        localStorage.setItem('lastCity', JSON.stringify({
+          lat: currentLat,
+          lon: currentLon,
+          name: currentCityName
+        }));
+        loadAllWeather();
+      } else {
+        alert(`未找到名为“${query}”的城市。请尝试输入更具体的名称，或使用拼音（如 Xuchang）。`);
       }
-      const url = `${base}/geo/v2/city/lookup?location=${encodeURIComponent(query)}&number=10&key=${key}`;
-      try {
-          const response = await fetch(url);
-          const data = await response.json();
-          if (data.code === '200' && data.location && data.location.length > 0) {
-              const firstResult = data.location[0];
-              currentLat = firstResult.lat;
-              currentLon = firstResult.lon;
-              currentCityName = firstResult.name;
-              cityNameEl.innerText = currentCityName;
-              localStorage.setItem('lastCity', JSON.stringify({
-                  lat: currentLat,
-                  lon: currentLon,
-                  name: currentCityName
-              }));
-              loadAllWeather();
-          } else {
-              alert(`未找到名为“${query}”的城市。请尝试输入更具体的名称，或使用拼音（如 Xuchang）。`);
-          }
-      } catch (error) {
-          console.error('城市搜索失败:', error);
-          alert('城市搜索失败，请检查网络连接或稍后再试。');
-      }
+    } catch (error) {
+      console.error('城市搜索失败:', error);
+      alert('城市搜索失败，请检查网络连接或稍后再试。');
+    }
   }
 
+  // ========== 定位函数（可被刷新按钮调用） ==========
   function getCurrentPosition() {
     if (navigator.geolocation) {
       navigator.geolocation.getCurrentPosition(
-        (pos) => {
+        async (pos) => {
           currentLat = pos.coords.latitude;
           currentLon = pos.coords.longitude;
-          updateCityNameByCoords();
+          try {
+            const rev = await fetch(`https://api.bigdatacloud.net/data/reverse-geocode-client?latitude=${currentLat}&longitude=${currentLon}&localityLanguage=zh`);
+            const data = await rev.json();
+            currentCityName = data.city || data.locality || "未知城市";
+            cityNameEl.innerText = currentCityName;
+            localStorage.setItem('lastCity', JSON.stringify({ lat: currentLat, lon: currentLon, name: currentCityName }));
+          } catch (e) {
+            cityNameEl.innerText = `${currentLat.toFixed(2)}°,${currentLon.toFixed(2)}°`;
+          }
+          weatherLoaded = true;
           loadAllWeather();
         },
-        () => {
-          loadCachedCity();
-          loadAllWeather();
-        }
+        (err) => {
+          console.warn('定位失败:', err);
+          cityNameEl.innerText = '📍 无法定位，请手动搜索';
+          weatherLoaded = false;
+          // 不加载天气，等待用户操作
+        },
+        { enableHighAccuracy: true, timeout: 8000, maximumAge: 60000 }
       );
     } else {
-      loadCachedCity();
-      loadAllWeather();
-    }
-  }
-
-  async function updateCityNameByCoords() {
-    try {
-      const rev = await fetch(`https://api.bigdatacloud.net/data/reverse-geocode-client?latitude=${currentLat}&longitude=${currentLon}&localityLanguage=zh`);
-      const data = await rev.json();
-      currentCityName = data.city || data.locality || "未知城市";
-      cityNameEl.innerText = currentCityName;
-      localStorage.setItem('lastCity', JSON.stringify({ lat: currentLat, lon: currentLon, name: currentCityName }));
-    } catch (e) {
-      cityNameEl.innerText = `${currentLat.toFixed(2)}°,${currentLon.toFixed(2)}°`;
-    }
-  }
-
-  function loadCachedCity() {
-    const cached = localStorage.getItem('lastCity');
-    if (cached) {
-      try {
-        const city = JSON.parse(cached);
-        currentLat = city.lat;
-        currentLon = city.lon;
-        currentCityName = city.name;
-        cityNameEl.innerText = currentCityName;
-      } catch(e) {}
-    } else {
-      currentLat = DEFAULT_LAT;
-      currentLon = DEFAULT_LON;
-      currentCityName = '北京';
-      cityNameEl.innerText = currentCityName;
+      cityNameEl.innerText = '📍 浏览器不支持定位，请手动搜索';
+      weatherLoaded = false;
     }
   }
 
@@ -622,32 +606,42 @@
     setQweatherHost(host);
     setQweatherKey(key);
     closeSettings();
-    loadAllWeather();
+    // 如果已加载天气，则刷新；否则不操作
+    if (weatherLoaded) {
+      loadAllWeather();
+    } else {
+      // 如果未加载，尝试定位
+      getCurrentPosition();
+    }
   }
 
-  // ========== 初始化 ==========
+  // ========== 初始化（只请求一次定位） ==========
   function init() {
     updateStatus();
 
-    const stored = localStorage.getItem('lastCity');
-    if (stored) {
-      try {
-        const city = JSON.parse(stored);
-        currentLat = city.lat;
-        currentLon = city.lon;
-        currentCityName = city.name;
-        cityNameEl.innerText = currentCityName;
-        loadAllWeather();
-      } catch(e) { getCurrentPosition(); }
-    } else {
-      getCurrentPosition();
-    }
+    // 初始状态显示“定位中...”
+    cityNameEl.innerText = '定位中...';
+    weatherLoaded = false;
 
-    refreshBtn.onclick = () => loadAllWeather();
+    // 启动定位（只这一次）
+    getCurrentPosition();
+
+    // 事件绑定
+    refreshBtn.onclick = () => {
+      if (weatherLoaded) {
+        // 已加载天气，重新加载当前城市（不重新定位）
+        loadAllWeather();
+      } else {
+        // 未加载（定位失败），重新尝试定位
+        getCurrentPosition();
+      }
+    };
+
     searchBtn.onclick = () => searchCity(searchInput.value.trim());
     searchInput.addEventListener('keypress', (e) => {
       if(e.key === 'Enter') searchCity(searchInput.value.trim());
     });
+
     settingsBtn.onclick = openSettings;
     cancelSettingsBtn.onclick = closeSettings;
     saveSettingsBtn.onclick = saveSettings;
