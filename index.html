@@ -308,18 +308,18 @@
       );
       const data = await rev.json();
 
-      // 优先返回 locality（区/县），其次 city（市），再其次 principalSubdivision（省）
-      if (data.locality) return data.locality;
-      if (data.city) return data.city;
-      if (data.principalSubdivision) return data.principalSubdivision;
-
-      // 如果上述字段都为空，尝试从 administrative 中提取最细（街道）
+      // 优先从 administrative 中提取最细（街道）
       if (data.localityInfo && data.localityInfo.administrative) {
         const admins = data.localityInfo.administrative;
         const sorted = admins.sort((a, b) => (b.order || 0) - (a.order || 0));
         const finest = sorted[0];
         if (finest && finest.name) return finest.name;
       }
+
+      // 备选返回 locality（区/县），其次 city（市），再其次 principalSubdivision（省）
+      if (data.locality) return data.locality;
+      if (data.city) return data.city;
+      if (data.principalSubdivision) return data.principalSubdivision;      
       return ''; // 完全获取不到
     } catch (e) {
       console.warn('反向地理编码失败:', e);
