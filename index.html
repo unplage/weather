@@ -13,7 +13,6 @@
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/qweather-icons@1.8.0/font/qweather-icons.css">
 
   <style>
-    /* ===== 基础样式（与之前完全相同） ===== */
     * { margin: 0; padding: 0; box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
     body { font-family: system-ui, -apple-system, 'Segoe UI', 'Helvetica Neue', Helvetica, 'Noto Sans', sans-serif; background: #f5f7fb; color: #1f2937; padding: 0 0 20px 0; }
     ::-webkit-scrollbar { height: 4px; width: 4px; }
@@ -301,7 +300,7 @@
     return null;
   }
 
-  // ========== 反向地理编码（优先 locality/city） ==========
+  // ========== 反向地理编码（优先 locality） ==========
   async function fetchCityName(lat, lon) {
     try {
       const rev = await fetch(
@@ -309,19 +308,19 @@
       );
       const data = await rev.json();
 
-      // 优先返回 locality（区/县）、city（市）或 principalSubdivision（省）
+      // 优先返回 locality（区/县），其次 city（市），再其次 principalSubdivision（省）
       if (data.locality) return data.locality;
       if (data.city) return data.city;
       if (data.principalSubdivision) return data.principalSubdivision;
 
-      // 若以上都没有，尝试从 administrative 提取最细（街道）
+      // 如果上述字段都为空，尝试从 administrative 中提取最细（街道）
       if (data.localityInfo && data.localityInfo.administrative) {
         const admins = data.localityInfo.administrative;
         const sorted = admins.sort((a, b) => (b.order || 0) - (a.order || 0));
         const finest = sorted[0];
         if (finest && finest.name) return finest.name;
       }
-      return '';
+      return ''; // 完全获取不到
     } catch (e) {
       console.warn('反向地理编码失败:', e);
       return '';
@@ -371,15 +370,14 @@
         async (pos) => {
           currentLat = pos.coords.latitude;
           currentLon = pos.coords.longitude;
-          // 获取地名
           const name = await fetchCityName(currentLat, currentLon);
           if (name) {
             currentCityName = name;
             cityNameEl.innerText = currentCityName;
             localStorage.setItem('lastCity', JSON.stringify({ lat: currentLat, lon: currentLon, name: currentCityName }));
           } else {
-            // 如果获取失败，显示经纬度
-            currentCityName = `${currentLat.toFixed(4)},${currentLon.toFixed(4)}`;
+            // 如果获取地名失败，显示友好提示
+            currentCityName = '📍 获取位置失败';
             cityNameEl.innerText = currentCityName;
             localStorage.setItem('lastCity', JSON.stringify({ lat: currentLat, lon: currentLon, name: currentCityName }));
           }
@@ -390,7 +388,6 @@
           console.warn('定位失败:', err);
           cityNameEl.innerText = '📍 无法定位，请手动搜索';
           weatherLoaded = false;
-          // 不加载天气，等待用户操作
         },
         { enableHighAccuracy: true, timeout: 8000, maximumAge: 60000 }
       );
