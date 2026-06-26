@@ -13,7 +13,7 @@
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/qweather-icons@1.8.0/font/qweather-icons.css">
 
   <style>
-    /* ===== 基础样式 ===== */
+    /* ===== 基础样式（与之前完全相同） ===== */
     * { margin: 0; padding: 0; box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
     body { font-family: system-ui, -apple-system, 'Segoe UI', 'Helvetica Neue', Helvetica, 'Noto Sans', sans-serif; background: #f5f7fb; color: #1f2937; padding: 0 0 20px 0; }
     ::-webkit-scrollbar { height: 4px; width: 4px; }
@@ -301,7 +301,7 @@
     return null;
   }
 
-  // ========== 反向地理编码（提取最细行政地名） ==========
+  // ========== 反向地理编码（优先 locality/city） ==========
   async function fetchCityName(lat, lon) {
     try {
       const rev = await fetch(
@@ -309,23 +309,21 @@
       );
       const data = await rev.json();
 
-      // 从 administrative 数组中提取 order 最大的条目（即最细行政单位）
+      // 优先返回 locality（区/县）、city（市）或 principalSubdivision（省）
+      if (data.locality) return data.locality;
+      if (data.city) return data.city;
+      if (data.principalSubdivision) return data.principalSubdivision;
+
+      // 若以上都没有，尝试从 administrative 提取最细（街道）
       if (data.localityInfo && data.localityInfo.administrative) {
         const admins = data.localityInfo.administrative;
-        // 按 order 降序排列，取第一个
         const sorted = admins.sort((a, b) => (b.order || 0) - (a.order || 0));
         const finest = sorted[0];
-        if (finest && finest.name) {
-          return finest.name; // 返回街道/镇名
-        }
+        if (finest && finest.name) return finest.name;
       }
-
-      // 备用降级方案
-      if (data.locality) return data.locality;      // "福田区"
-      if (data.city) return data.city;              // "深圳市"
-      if (data.principalSubdivision) return data.principalSubdivision; // "广东省"
-      return `${lat.toFixed(4)},${lon.toFixed(4)}`;
-    } catch {
+      return '';
+    } catch (e) {
+      console.warn('反向地理编码失败:', e);
       return '';
     }
   }
@@ -373,7 +371,7 @@
         async (pos) => {
           currentLat = pos.coords.latitude;
           currentLon = pos.coords.longitude;
-          // 获取最细行政地名
+          // 获取地名
           const name = await fetchCityName(currentLat, currentLon);
           if (name) {
             currentCityName = name;
@@ -629,9 +627,9 @@
     setQweatherKey(key);
     closeSettings();
     if (weatherLoaded) {
-      loadAllWeather(); // 已加载则刷新
+      loadAllWeather();
     } else {
-      getCurrentPosition(); // 未加载则重新定位
+      getCurrentPosition();
     }
   }
 
@@ -639,17 +637,15 @@
   function init() {
     updateStatus();
 
-    // 初始状态：定位中，不加载缓存
     cityNameEl.innerText = '定位中...';
     weatherLoaded = false;
-    getCurrentPosition(); // 只调用一次定位
+    getCurrentPosition();
 
-    // 事件绑定
     refreshBtn.onclick = () => {
       if (weatherLoaded) {
-        loadAllWeather(); // 已加载则刷新当前城市
+        loadAllWeather();
       } else {
-        getCurrentPosition(); // 未加载则重新定位
+        getCurrentPosition();
       }
     };
 
