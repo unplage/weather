@@ -13,7 +13,7 @@
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/qweather-icons@1.8.0/font/qweather-icons.css">
 
   <style>
-    /* ===== 基础样式（与之前完全相同） ===== */
+    /* ===== 基础样式 ===== */
     * { margin: 0; padding: 0; box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
     body { font-family: system-ui, -apple-system, 'Segoe UI', 'Helvetica Neue', Helvetica, 'Noto Sans', sans-serif; background: #f5f7fb; color: #1f2937; padding: 0 0 20px 0; }
     ::-webkit-scrollbar { height: 4px; width: 4px; }
@@ -220,7 +220,7 @@
   let currentLat = DEFAULT_LAT;
   let currentLon = DEFAULT_LON;
   let currentCityName = '北京';
-  let weatherLoaded = false; // 标记是否已加载天气（定位成功或手动搜索）
+  let weatherLoaded = false;
 
   // DOM 元素
   const cityNameEl = document.getElementById('cityName');
@@ -301,13 +301,32 @@
     return null;
   }
 
+  // ========== 反向地理编码（提取最细行政地名） ==========
   async function fetchCityName(lat, lon) {
     try {
-      const rev = await fetch(`https://api.bigdatacloud.net/data/reverse-geocode-client?latitude=${lat}&longitude=${lon}&localityLanguage=zh`);
+      const rev = await fetch(
+        `https://api.bigdatacloud.net/data/reverse-geocode-client?latitude=${lat}&longitude=${lon}&localityLanguage=zh`
+      );
       const data = await rev.json();
-      return data.city || data.locality || `${lat.toFixed(2)},${lon.toFixed(2)}`;
+
+      // 从 administrative 数组中提取 order 最大的条目（即最细行政单位）
+      if (data.localityInfo && data.localityInfo.administrative) {
+        const admins = data.localityInfo.administrative;
+        // 按 order 降序排列，取第一个
+        const sorted = admins.sort((a, b) => (b.order || 0) - (a.order || 0));
+        const finest = sorted[0];
+        if (finest && finest.name) {
+          return finest.name; // 返回街道/镇名
+        }
+      }
+
+      // 备用降级方案
+      if (data.locality) return data.locality;      // "福田区"
+      if (data.city) return data.city;              // "深圳市"
+      if (data.principalSubdivision) return data.principalSubdivision; // "广东省"
+      return `${lat.toFixed(4)},${lon.toFixed(4)}`;
     } catch {
-      return `${lat.toFixed(2)}°,${lon.toFixed(2)}°`;
+      return '';
     }
   }
 
@@ -347,21 +366,24 @@
     }
   }
 
-  // ========== 定位函数（可被刷新按钮调用） ==========
+  // ========== 定位函数（单次） ==========
   function getCurrentPosition() {
     if (navigator.geolocation) {
       navigator.geolocation.getCurrentPosition(
         async (pos) => {
           currentLat = pos.coords.latitude;
           currentLon = pos.coords.longitude;
-          try {
-            const rev = await fetch(`https://api.bigdatacloud.net/data/reverse-geocode-client?latitude=${currentLat}&longitude=${currentLon}&localityLanguage=zh`);
-            const data = await rev.json();
-            currentCityName = data.city || data.locality || "未知城市";
+          // 获取最细行政地名
+          const name = await fetchCityName(currentLat, currentLon);
+          if (name) {
+            currentCityName = name;
             cityNameEl.innerText = currentCityName;
             localStorage.setItem('lastCity', JSON.stringify({ lat: currentLat, lon: currentLon, name: currentCityName }));
-          } catch (e) {
-            cityNameEl.innerText = `${currentLat.toFixed(2)}°,${currentLon.toFixed(2)}°`;
+          } else {
+            // 如果获取失败，显示经纬度
+            currentCityName = `${currentLat.toFixed(4)},${currentLon.toFixed(4)}`;
+            cityNameEl.innerText = currentCityName;
+            localStorage.setItem('lastCity', JSON.stringify({ lat: currentLat, lon: currentLon, name: currentCityName }));
           }
           weatherLoaded = true;
           loadAllWeather();
@@ -606,42 +628,35 @@
     setQweatherHost(host);
     setQweatherKey(key);
     closeSettings();
-    // 如果已加载天气，则刷新；否则不操作
     if (weatherLoaded) {
-      loadAllWeather();
+      loadAllWeather(); // 已加载则刷新
     } else {
-      // 如果未加载，尝试定位
-      getCurrentPosition();
+      getCurrentPosition(); // 未加载则重新定位
     }
   }
 
-  // ========== 初始化（只请求一次定位） ==========
+  // ========== 初始化 ==========
   function init() {
     updateStatus();
 
-    // 初始状态显示“定位中...”
+    // 初始状态：定位中，不加载缓存
     cityNameEl.innerText = '定位中...';
     weatherLoaded = false;
-
-    // 启动定位（只这一次）
-    getCurrentPosition();
+    getCurrentPosition(); // 只调用一次定位
 
     // 事件绑定
     refreshBtn.onclick = () => {
       if (weatherLoaded) {
-        // 已加载天气，重新加载当前城市（不重新定位）
-        loadAllWeather();
+        loadAllWeather(); // 已加载则刷新当前城市
       } else {
-        // 未加载（定位失败），重新尝试定位
-        getCurrentPosition();
+        getCurrentPosition(); // 未加载则重新定位
       }
     };
 
     searchBtn.onclick = () => searchCity(searchInput.value.trim());
     searchInput.addEventListener('keypress', (e) => {
-      if(e.key === 'Enter') searchCity(searchInput.value.trim());
+      if (e.key === 'Enter') searchCity(searchInput.value.trim());
     });
-
     settingsBtn.onclick = openSettings;
     cancelSettingsBtn.onclick = closeSettings;
     saveSettingsBtn.onclick = saveSettings;
