@@ -1,4 +1,4 @@
-const CACHE_NAME = 'weather-pwa-v2-1336';
+const CACHE_NAME = 'weather-pwa-v2-1337';
 const urlsToCache = [
   '/weather/',
   '/weather/index.html',
