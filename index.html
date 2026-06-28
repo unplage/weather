@@ -389,7 +389,7 @@
           cityNameEl.innerText = '📍 无法定位，请手动搜索';
           weatherLoaded = false;
         },
-        { enableHighAccuracy: false, timeout: 8000, maximumAge: 60000 }
+        { enableHighAccuracy: true, timeout: 8000, maximumAge: 60000 }
       );
     } else {
       cityNameEl.innerText = '📍 浏览器不支持定位，请手动搜索';
