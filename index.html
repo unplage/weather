@@ -58,10 +58,12 @@
     .index-name { font-size: 13px; color: #6b7280; }
     .index-level { font-weight: 600; font-size: 16px; margin-top: 4px; }
     .index-desc { font-size: 12px; color: #6b7280; margin-top: 2px; }
-    .minutely-container { display: flex; align-items: flex-end; height: 80px; gap: 4px; padding-top: 12px; overflow-x: auto; }
-    .minute-bar { flex: 0 0 12px; background: #93c5fd; border-radius: 4px 4px 0 0; min-height: 4px; transition: height 0.2s; }
-    .minute-bar.has-rain { background: #3b82f6; }
-    .minutely-summary { font-size: 14px; color: #4b5563; margin-top: 8px; text-align: center; }
+    .hour-icon { font-size: 24px; margin: 4px 0; }
+    .hour-icon .qi { font-size: 26px; }
+    .minutely-container { display: flex; align-items: flex-end; height: 90px; gap: 3px; padding-top: 12px; }
+    .minute-bar { flex: 1 1 0; border-radius: 3px 3px 0 0; min-height: 4px; transition: height 0.3s ease, background 0.3s ease; background: #e2e8f0; }
+    .minute-axis { display: flex; justify-content: space-between; font-size: 11px; color: #94a3b8; margin-top: 6px; }
+    .minutely-summary { font-size: 14px; color: #4b5563; margin-top: 10px; text-align: center; line-height: 1.5; }
     footer { text-align: center; font-size: 12px; color: #94a3b8; margin-top: 24px; }
     .loading { text-align: center; padding: 40px; color: #6c757d; }
     button { background: none; border: none; }
@@ -146,6 +148,7 @@
   <div class="card" id="minutelyCard" style="display:none;">
     <div class="section-title">🌧️ 分钟级降水预报</div>
     <div class="minutely-container" id="minutelyContainer"></div>
+    <div class="minute-axis" id="minutelyAxis"></div>
     <div class="minutely-summary" id="minutelySummary"></div>
   </div>
 
@@ -242,6 +245,7 @@
   const indicesGrid = document.getElementById('indicesGrid');
   const minutelyCard = document.getElementById('minutelyCard');
   const minutelyContainer = document.getElementById('minutelyContainer');
+  const minutelyAxis = document.getElementById('minutelyAxis');
   const minutelySummary = document.getElementById('minutelySummary');
 
   // 设置面板
@@ -343,8 +347,8 @@
       const data = await response.json();
       if (data.code === '200' && data.location && data.location.length > 0) {
         const firstResult = data.location[0];
-        currentLat = firstResult.lat;
-        currentLon = firstResult.lon;
+        currentLat = parseFloat(firstResult.lat);
+        currentLon = parseFloat(firstResult.lon);
         currentCityName = firstResult.name;
         cityNameEl.innerText = currentCityName;
         weatherLoaded = true;
@@ -364,6 +368,26 @@
   }
 
   // ========== 定位函数（单次） ==========
+  // 定位失败时回退到上次保存的城市，避免无数据可看
+  function fallbackToLastCity() {
+    const lastCity = localStorage.getItem('lastCity');
+    if (lastCity) {
+      try {
+        const c = JSON.parse(lastCity);
+        currentLat = parseFloat(c.lat);
+        currentLon = parseFloat(c.lon);
+        currentCityName = c.name;
+        cityNameEl.innerText = currentCityName;
+        weatherLoaded = true;
+        loadAllWeather();
+        return true;
+      } catch (e) {
+        // 缓存数据损坏，继续走失败分支
+      }
+    }
+    return false;
+  }
+
   function getCurrentPosition() {
     if (navigator.geolocation) {
       navigator.geolocation.getCurrentPosition(
@@ -386,14 +410,18 @@
         },
         (err) => {
           console.warn('定位失败:', err);
-          cityNameEl.innerText = '📍 无法定位，请手动搜索';
-          weatherLoaded = false;
+          if (!fallbackToLastCity()) {
+            cityNameEl.innerText = '📍 无法定位，请手动搜索';
+            weatherLoaded = false;
+          }
         },
         { enableHighAccuracy: true, timeout: 8000, maximumAge: 60000 }
       );
     } else {
-      cityNameEl.innerText = '📍 浏览器不支持定位，请手动搜索';
-      weatherLoaded = false;
+      if (!fallbackToLastCity()) {
+        cityNameEl.innerText = '📍 浏览器不支持定位，请手动搜索';
+        weatherLoaded = false;
+      }
     }
   }
 
@@ -434,7 +462,7 @@
       const hourlyPromise = safeFetchJson(`${base}/v7/weather/24h?${commonParams}`);
       const dailyPromise = safeFetchJson(`${base}/v7/weather/7d?${commonParams}`);
       const aqiUrl = `${base}/airquality/v1/current/${currentLat}/${currentLon}?key=${key}`;
-      const aqiPromise = fetch(aqiUrl).then(res => res.json()).catch(() => ({ code: 'network_error' }));
+      const aqiPromise = safeFetchJson(aqiUrl);
       const warningPromise = safeFetchJson(`${base}/v7/warning/now?${commonParams}`);
       const indicesPromise = safeFetchJson(`${base}/v7/indices/1d?${commonParams}&type=1,2,3,5,6,7,8,9`);
       const minutelyPromise = safeFetchJson(`${base}/v7/minutely/5m?${commonParams}`);
@@ -487,13 +515,20 @@
     }
     const hours = data.hourly.slice(0, 24);
     hourlyContainer.innerHTML = '';
-    hours.forEach(h => {
+    const currentHour = new Date().getHours();
+    hours.forEach((h, idx) => {
       const hour = h.fxTime ? extractHour(h.fxTime) : null;
-      const displayHour = (hour !== null) ? `${hour}:00` : '--:00';
+      let displayHour;
+      if (hour !== null) {
+        displayHour = (idx === 0 || hour === currentHour) ? '现在' : `${hour}:00`;
+      } else {
+        displayHour = '--:00';
+      }
       const div = document.createElement('div');
       div.className = 'hour-item';
       div.innerHTML = `
         <div class="hour-time">${displayHour}</div>
+        <div class="hour-icon">${getWeatherIcon(h.icon)}</div>
         <div class="hour-temp">${h.temp}°</div>
         <div class="hour-rain">💧${h.pop || 0}%</div>
       `;
@@ -584,21 +619,88 @@
       return;
     }
     minutelyCard.style.display = 'block';
-    const items = data.minutely.slice(0, 12);
-    const maxPrecip = Math.max(...items.map(d => d.precipitation), 0.1);
+
+    // API 返回未来 2 小时、每 5 分钟一个点（共 24 个）
+    const items = data.minutely;
+    const isSnow = items.some(d => d.type === 'snow');
+    const RAIN_THRESHOLD = 0.1; // mm/5min（≈1.2 mm/h），区分有无降水
+
+    // 强度配色：precip 是 mm/5min，×12 换算为 mm/h 强度
+    // 雨量等级：小雨 <2.5，中雨 2.5-8，大雨 8-16，暴雨 ≥16 mm/h
+    function barColor(precip) {
+      const mmh = precip * 12;
+      if (mmh < 1.2) return '#e2e8f0'; // 无降水
+      if (isSnow) {
+        if (mmh < 2.5) return '#e0e7ff';
+        if (mmh < 8) return '#a5b4fc';
+        return '#6366f1';
+      }
+      if (mmh < 2.5) return '#93c5fd'; // 小雨
+      if (mmh < 8) return '#3b82f6';   // 中雨
+      if (mmh < 16) return '#1d4ed8';  // 大雨
+      return '#1e3a8a';                 // 暴雨
+    }
+
+    // 柱高基准：取最大降水值，避免被极端值压扁
+    const precipValues = items.map(d => parseFloat(d.precip) || 0);
+    const maxPrecip = Math.max(...precipValues, 0.1);
+
     minutelyContainer.innerHTML = '';
-    items.forEach(item => {
+    items.forEach((item, idx) => {
+      const p = parseFloat(item.precip) || 0;
       const bar = document.createElement('div');
-      const height = maxPrecip > 0 ? Math.max(4, (item.precipitation / maxPrecip) * 70) : 4;
-      bar.className = `minute-bar${item.precipitation > 0 ? ' has-rain' : ''}`;
+      bar.className = 'minute-bar';
+      // 柱高按相对强度，无降水时给最小高度作为基线
+      const height = p > 0 ? Math.max(6, (p / maxPrecip) * 76) : 6;
       bar.style.height = height + 'px';
+      bar.style.background = barColor(p);
+      bar.title = `+${idx * 5}分钟 · ${p.toFixed(2)} mm`;
       minutelyContainer.appendChild(bar);
     });
-    const hasRain = items.some(d => d.precipitation > 0);
-    const maxVal = maxPrecip.toFixed(1);
-    minutelySummary.textContent = hasRain
-      ? `未来1小时有降雨，最大强度 ${maxVal} mm/h`
-      : '未来1小时无降雨';
+
+    // 时间轴：现在 / +30m / +1h / +1.5h / +2h
+    minutelyAxis.innerHTML = '';
+    ['现在', '+30m', '+1h', '+1.5h', '+2h'].forEach(label => {
+      const span = document.createElement('span');
+      span.textContent = label;
+      minutelyAxis.appendChild(span);
+    });
+
+    // 自然语言预测：开始下雨 / 停雨 / 持续
+    const hasRainNow = precipValues[0] > RAIN_THRESHOLD;
+    let firstRainIdx = -1, firstStopIdx = -1;
+    for (let i = 0; i < precipValues.length; i++) {
+      if (firstRainIdx === -1 && precipValues[i] > RAIN_THRESHOLD) firstRainIdx = i;
+      if (firstRainIdx !== -1 && firstStopIdx === -1 && precipValues[i] <= RAIN_THRESHOLD) firstStopIdx = i;
+    }
+    const noun = isSnow ? '雪' : '雨';
+    let prediction = '';
+    if (firstRainIdx === -1) {
+      prediction = `未来2小时无降${noun}`;
+    } else if (hasRainNow) {
+      if (firstStopIdx !== -1) {
+        prediction = `当前正在下${noun}，预计${firstStopIdx * 5}分钟后停${noun}`;
+      } else {
+        prediction = `当前正在下${noun}，未来2小时持续`;
+      }
+    } else {
+      const startMin = firstRainIdx * 5;
+      if (firstStopIdx !== -1) {
+        const duration = (firstStopIdx - firstRainIdx) * 5;
+        prediction = `${startMin}分钟后开始下${noun}，持续约${duration}分钟`;
+      } else {
+        prediction = `${startMin}分钟后开始下${noun}，未来2小时持续`;
+      }
+    }
+
+    // 最大强度（mm/h 正确换算）
+    const maxPrecipVal = Math.max(...precipValues);
+    const maxIntensity = (maxPrecipVal * 12).toFixed(1);
+    const intensityText = maxPrecipVal > RAIN_THRESHOLD ? ` · 最大强度 ${maxIntensity} mm/h` : '';
+
+    // 优先使用 API 官方 summary，回退到自算预测
+    const summaryText = (data.summary && data.summary.trim()) ? data.summary.trim() : prediction;
+    minutelySummary.textContent = summaryText + intensityText;
   }
 
   function showLoading() {
