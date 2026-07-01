@@ -1,4 +1,4 @@
-// sw.js - 通用 Service Worker (适配 GitHub Pages 多项目)
+// sw.js - 针对此天气软件，不通用 Service Worker ！！！！！！！！！！！！！！！！！！！
 // 动态确定当前应用的子目录，隔离缓存，确保离线访问正常
 
 // ---------- 1. 动态路径与缓存名称 ----------
@@ -6,7 +6,7 @@
 const BASE_PATH = self.location.pathname.replace(/[^/]+$/, '');
 // 构建带项目标识的缓存名称，避免多项目冲突
 // 例如 '/pwa1/' -> 'pwa-cache-pwa1-v1'
-const CACHE_NAME = `pwa-cache${BASE_PATH.replace(/\//g, '-')}v2`;
+const CACHE_NAME = `pwa-cache${BASE_PATH.replace(/\//g, '-')}v3`;
 
 // 预缓存资源列表（全部使用相对于当前 sw.js 的路径）
 const PRECACHE_URLS = [
@@ -105,27 +105,51 @@ self.addEventListener('fetch', (event) => {
   }
 
   // ----- 5.2 静态资源请求：缓存优先，未命中则网络请求并缓存 -----
-  if (isStaticResource(url)) {
+  // 允许同源或指定的 CDN 跨域资源
+  const isAllowedCDN = url.hostname === 'cdn.jsdelivr.net';
+  if (isStaticResource(url) && (url.origin === location.origin || isAllowedCDN)) {
     event.respondWith(
       caches.match(request).then(cachedResponse => {
         if (cachedResponse) {
           return cachedResponse;
         }
         return fetch(request).then(networkResponse => {
-          if (networkResponse && networkResponse.status === 200) {
+          // 注意：跨域不透明响应 status 为 0，所以用 !networkResponse.ok 不可靠，直接判断是否存在即可
+          if (networkResponse) {
             const responseClone = networkResponse.clone();
             caches.open(CACHE_NAME).then(cache => cache.put(request, responseClone));
           }
           return networkResponse;
         }).catch(() => {
-          // 完全离线且无缓存，返回空响应（可自定义）
           return new Response('', { status: 408 });
         });
       })
     );
     return;
   }
+  // ----- 5.3 API 请求（和风天气数据）：缓存优先，后台更新 -----
+  const isWeatherAPI = url.hostname.endsWith('qweatherapi.com') || url.hostname.endsWith('qweather.com') || url.hostname === 'api.bigdatacloud.net';
+  
+  if (isWeatherAPI) {
+    event.respondWith(
+      caches.open(CACHE_NAME).then(async (cache) => {
+        const cachedResponse = await cache.match(request);
+        const fetchPromise = fetch(request).then((networkResponse) => {
+          // 成功获取则更新缓存
+          if (networkResponse && networkResponse.status === 200) {
+            cache.put(request, networkResponse.clone());
+          }
+          return networkResponse;
+        }).catch(() => {
+          // 离线不做处理，返回 undefined 让外层走缓存
+        });
 
-  // ----- 5.3 其他请求（如 API）默认不缓存，直接走网络 -----
+        // 如果有缓存，立即返回缓存，同时后台发起网络请求更新
+        return cachedResponse || fetchPromise || new Response('{"code":"offline"}', { status: 503 });
+      })
+    );
+    return;
+  }
+  // ----- 5.4 其他请求（如 API）默认不缓存，直接走网络 -----
   // （业务数据通常存储在 IndexedDB 中，不受影响）
 });
