@@ -9,7 +9,7 @@
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
 
-  <!-- 和风天气图标库（官方正确CDN） -->
+  <!-- 和风天气图标库 -->
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/qweather-icons@1.8.0/font/qweather-icons.css">
 
   <style>
@@ -262,49 +262,22 @@
   }
 
   // ========== 辅助函数 ==========
-  function getTodayStr() {
-    const now = new Date();
-    const y = now.getFullYear();
-    const m = String(now.getMonth() + 1).padStart(2, '0');
-    const d = String(now.getDate()).padStart(2, '0');
-    return `${y}${m}${d}`;
-  }
-
+  // 修复 Bug：直接使用正则提取，避免 new Date() 导致的跨时区时间偏移问题
   function extractHour(timeStr) {
     if (!timeStr) return null;
-    let date = new Date(timeStr);
-    if (!isNaN(date.getHours())) return date.getHours();
     const match = timeStr.match(/(?:T|\s)(\d{2}):\d{2}/);
     if (match) return parseInt(match[1], 10);
-    const num = parseInt(timeStr, 10);
-    if (!isNaN(num) && num > 1e9) {
-      date = new Date(num * 1000);
-      if (!isNaN(date.getHours())) return date.getHours();
-    }
     return null;
   }
 
   function extractDate(timeStr) {
     if (!timeStr) return null;
-    let date = new Date(timeStr);
-    if (!isNaN(date.getMonth())) {
-      return `${date.getMonth()+1}月${date.getDate()}日`;
-    }
     const match = timeStr.match(/(\d{4})-(\d{2})-(\d{2})/);
-    if (match) {
-      return `${parseInt(match[2],10)}月${parseInt(match[3],10)}日`;
-    }
-    const num = parseInt(timeStr, 10);
-    if (!isNaN(num) && num > 1e9) {
-      date = new Date(num * 1000);
-      if (!isNaN(date.getMonth())) {
-        return `${date.getMonth()+1}月${date.getDate()}日`;
-      }
-    }
+    if (match) return `${parseInt(match[2],10)}月${parseInt(match[3],10)}日`;
     return null;
   }
 
-  // ========== 反向地理编码（优先 locality） ==========
+  // ========== 反向地理编码 ==========
   async function fetchCityName(lat, lon) {
     try {
       const rev = await fetch(
@@ -312,7 +285,6 @@
       );
       const data = await rev.json();
 
-      // 优先从 administrative 中提取最细（街道）
       if (data.localityInfo && data.localityInfo.administrative) {
         const admins = data.localityInfo.administrative;
         const sorted = admins.sort((a, b) => (b.order || 0) - (a.order || 0));
@@ -320,11 +292,10 @@
         if (finest && finest.name) return finest.name;
       }
 
-      // 备选返回 locality（区/县），其次 city（市），再其次 principalSubdivision（省）
       if (data.locality) return data.locality;
       if (data.city) return data.city;
       if (data.principalSubdivision) return data.principalSubdivision;      
-      return ''; // 完全获取不到
+      return '';
     } catch (e) {
       console.warn('反向地理编码失败:', e);
       return '';
@@ -334,13 +305,14 @@
   // ========== 搜索城市 ==========
   async function searchCity(query) {
     if (!query) return;
-    const host = getQweatherHost() || 'https://devapi.qweather.com';
+    const host = getQweatherHost();
     const key = getQweatherKey();
-    const base = host.replace(/\/+$/, '');
-    if (!key) {
-      alert('请先在设置中配置您的和风天气 API Key，才能使用城市搜索功能。');
+    if (!host || !key) {
+      alert('请先在设置中配置您的和风天气 API Host 和 Key，才能使用城市搜索功能。');
+      openSettings();
       return;
     }
+    const base = host.replace(/\/+$/, '');
     const url = `${base}/geo/v2/city/lookup?location=${encodeURIComponent(query)}&number=10&key=${key}`;
     try {
       const response = await fetch(url);
@@ -367,8 +339,7 @@
     }
   }
 
-  // ========== 定位函数（单次） ==========
-  // 定位失败时回退到上次保存的城市，避免无数据可看
+  // ========== 定位函数 ==========
   function fallbackToLastCity() {
     const lastCity = localStorage.getItem('lastCity');
     if (lastCity) {
@@ -382,7 +353,7 @@
         loadAllWeather();
         return true;
       } catch (e) {
-        // 缓存数据损坏，继续走失败分支
+        // 缓存损坏
       }
     }
     return false;
@@ -395,16 +366,14 @@
           currentLat = pos.coords.latitude;
           currentLon = pos.coords.longitude;
           const name = await fetchCityName(currentLat, currentLon);
+          // 修复 Bug：获取地名失败时不污染本地缓存
           if (name) {
             currentCityName = name;
-            cityNameEl.innerText = currentCityName;
             localStorage.setItem('lastCity', JSON.stringify({ lat: currentLat, lon: currentLon, name: currentCityName }));
           } else {
-            // 如果获取地名失败，显示友好提示
-            currentCityName = '📍 获取位置失败';
-            cityNameEl.innerText = currentCityName;
-            localStorage.setItem('lastCity', JSON.stringify({ lat: currentLat, lon: currentLon, name: currentCityName }));
+            currentCityName = '当前位置';
           }
+          cityNameEl.innerText = currentCityName;
           weatherLoaded = true;
           loadAllWeather();
         },
@@ -448,15 +417,19 @@
   async function loadAllWeather() {
     showLoading();
     try {
-      const host = getQweatherHost() || 'https://devapi.qweather.com';
+      const host = getQweatherHost();
       const key = getQweatherKey();
-      const base = host.replace(/\/+$/, '');
-      const commonParams = `location=${currentLon},${currentLat}&key=${key}`;
-
+      
+      // 修复 Bug：不再 fallback 到 devapi，未配置直接拦截
       if (!host || !key) {
-        alert('请先点击齿轮设置 API Host 和 Key');
+        alert('请先点击齿轮设置您的专属 API Host 和 Key');
+        openSettings();
+        hideLoading();
         return;
       }
+
+      const base = host.replace(/\/+$/, '');
+      const commonParams = `location=${currentLon},${currentLat}&key=${key}`;
 
       const nowPromise = safeFetchJson(`${base}/v7/weather/now?${commonParams}`);
       const hourlyPromise = safeFetchJson(`${base}/v7/weather/24h?${commonParams}`);
@@ -515,12 +488,12 @@
     }
     const hours = data.hourly.slice(0, 24);
     hourlyContainer.innerHTML = '';
-    const currentHour = new Date().getHours();
     hours.forEach((h, idx) => {
       const hour = h.fxTime ? extractHour(h.fxTime) : null;
       let displayHour;
+      // 修复 Bug：去掉 hour === currentHour 判断，避免出现两个“现在”
       if (hour !== null) {
-        displayHour = (idx === 0 || hour === currentHour) ? '现在' : `${hour}:00`;
+        displayHour = idx === 0 ? '现在' : `${hour}:00`;
       } else {
         displayHour = '--:00';
       }
@@ -557,9 +530,11 @@
       row.innerHTML = `
         <div class="daily-date">${dateDisplay}</div>
         <div class="daily-icon">${getWeatherIcon(iconCode)}</div>
-        <div style="flex:1; text-align:left; padding-left:8px; font-size:14px; color:#4b5563;">${weatherText}</div>
+        <div style="flex:1; text-align:left; padding-left:8px; font-size:14px; color:#4b5563;" class="daily-text"></div>
         <div class="daily-temp">${d.tempMax}° / ${d.tempMin}°</div>
       `;
+      // 修复 Bug：安全处理文本，防止 XSS
+      row.querySelector('.daily-text').textContent = weatherText;
       dailyContainer.appendChild(row);
     });
   }
@@ -580,7 +555,6 @@
         return;
       }
     }
-    console.warn('AQI 数据格式未知:', data);
     aqiEl.innerText = '暂不可用';
   }
 
@@ -590,7 +564,8 @@
       return;
     }
     const warn = data.warning[0];
-    alertContent.innerHTML = `${warn.title} · ${warn.level} · ${warn.text}`;
+    // 修复 Bug：安全处理文本
+    alertContent.textContent = `${warn.title} · ${warn.level} · ${warn.text}`;
     alertCard.style.display = 'block';
   }
 
@@ -605,10 +580,14 @@
       const div = document.createElement('div');
       div.className = 'index-item';
       div.innerHTML = `
-        <div class="index-name">${item.name}</div>
-        <div class="index-level">${item.level}</div>
-        <div class="index-desc">${item.text || ''}</div>
+        <div class="index-name"></div>
+        <div class="index-level"></div>
+        <div class="index-desc"></div>
       `;
+      // 修复 Bug：安全处理文本
+      div.querySelector('.index-name').textContent = item.name;
+      div.querySelector('.index-level').textContent = item.level;
+      div.querySelector('.index-desc').textContent = item.text || '';
       indicesGrid.appendChild(div);
     });
   }
@@ -620,13 +599,10 @@
     }
     minutelyCard.style.display = 'block';
 
-    // API 返回未来 2 小时、每 5 分钟一个点（共 24 个）
     const items = data.minutely;
     const isSnow = items.some(d => d.type === 'snow');
-    const RAIN_THRESHOLD = 0.1; // mm/5min（≈1.2 mm/h），区分有无降水
+    const RAIN_THRESHOLD = 0.1; // mm/5min（≈1.2 mm/h）
 
-    // 强度配色：precip 是 mm/5min，×12 换算为 mm/h 强度
-    // 雨量等级：小雨 <2.5，中雨 2.5-8，大雨 8-16，暴雨 ≥16 mm/h
     function barColor(precip) {
       const mmh = precip * 12;
       if (mmh < 1.2) return '#e2e8f0'; // 无降水
@@ -641,7 +617,6 @@
       return '#1e3a8a';                 // 暴雨
     }
 
-    // 柱高基准：取最大降水值，避免被极端值压扁
     const precipValues = items.map(d => parseFloat(d.precip) || 0);
     const maxPrecip = Math.max(...precipValues, 0.1);
 
@@ -650,15 +625,14 @@
       const p = parseFloat(item.precip) || 0;
       const bar = document.createElement('div');
       bar.className = 'minute-bar';
-      // 柱高按相对强度，无降水时给最小高度作为基线
-      const height = p > 0 ? Math.max(6, (p / maxPrecip) * 76) : 6;
+      // 修复 Bug：高度计算也基于 RAIN_THRESHOLD，避免出现“灰色高柱”
+      const height = p > RAIN_THRESHOLD ? Math.max(6, (p / maxPrecip) * 76) : 6;
       bar.style.height = height + 'px';
       bar.style.background = barColor(p);
       bar.title = `+${idx * 5}分钟 · ${p.toFixed(2)} mm`;
       minutelyContainer.appendChild(bar);
     });
 
-    // 时间轴：现在 / +30m / +1h / +1.5h / +2h
     minutelyAxis.innerHTML = '';
     ['现在', '+30m', '+1h', '+1.5h', '+2h'].forEach(label => {
       const span = document.createElement('span');
@@ -666,7 +640,6 @@
       minutelyAxis.appendChild(span);
     });
 
-    // 自然语言预测：开始下雨 / 停雨 / 持续
     const hasRainNow = precipValues[0] > RAIN_THRESHOLD;
     let firstRainIdx = -1, firstStopIdx = -1;
     for (let i = 0; i < precipValues.length; i++) {
@@ -693,20 +666,29 @@
       }
     }
 
-    // 最大强度（mm/h 正确换算）
     const maxPrecipVal = Math.max(...precipValues);
     const maxIntensity = (maxPrecipVal * 12).toFixed(1);
     const intensityText = maxPrecipVal > RAIN_THRESHOLD ? ` · 最大强度 ${maxIntensity} mm/h` : '';
 
-    // 优先使用 API 官方 summary，回退到自算预测
     const summaryText = (data.summary && data.summary.trim()) ? data.summary.trim() : prediction;
+    // 修复 Bug：安全处理文本
     minutelySummary.textContent = summaryText + intensityText;
   }
 
+  // 修复 Bug：完善加载状态清理
   function showLoading() {
     document.querySelectorAll('.loading').forEach(el => el.innerHTML = '加载中...');
   }
-  function hideLoading() {}
+  function hideLoading() {
+    // 如果容器还是 loading 状态，说明数据没加载出来，清理掉避免一直转圈
+    const loadingElements = document.querySelectorAll('.loading');
+    loadingElements.forEach(el => {
+      // 如果父容器没有被子元素覆盖（即还是初始 loading 状态），则提示失败
+      if (el.parentElement.children.length === 1) {
+        el.innerHTML = '加载失败或无数据';
+      }
+    });
+  }
 
   // ========== 设置面板 ==========
   function openSettings() {
