@@ -277,24 +277,22 @@
     return null;
   }
 
-  // ========== 反向地理编码 ==========
+  // ========== 反向地理编码（改用和风天气官方 API，更稳定） ==========
   async function fetchCityName(lat, lon) {
+    const host = getQweatherHost();
+    const key = getQweatherKey();
+    if (!host || !key) return '';
+    
+    const base = host.replace(/\/+$/, '');
+    // 和风天气城市查询 API 支持直接传入 "经度,纬度"
+    const url = `${base}/geo/v2/city/lookup?location=${lon},${lat}&key=${key}`;
     try {
-      const rev = await fetch(
-        `https://api.bigdatacloud.net/data/reverse-geocode-client?latitude=${lat}&longitude=${lon}&localityLanguage=zh`
-      );
-      const data = await rev.json();
-
-      if (data.localityInfo && data.localityInfo.administrative) {
-        const admins = data.localityInfo.administrative;
-        const sorted = admins.sort((a, b) => (b.order || 0) - (a.order || 0));
-        const finest = sorted[0];
-        if (finest && finest.name) return finest.name;
+      const res = await fetch(url);
+      const data = await res.json();
+      if (data.code === '200' && data.location && data.location.length > 0) {
+        // 优先返回市级别名称，如果需要更详细可以改用 data.location[0].name
+        return data.location[0].name; 
       }
-
-      if (data.locality) return data.locality;
-      if (data.city) return data.city;
-      if (data.principalSubdivision) return data.principalSubdivision;      
       return '';
     } catch (e) {
       console.warn('反向地理编码失败:', e);
