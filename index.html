@@ -478,6 +478,24 @@
   }
 
   // ========== 核心加载 ==========
+  // 修复 Bug：空气质量先试新版接口，失败/无权限时回退旧版 v7/air/now（免费订阅可用）
+  async function fetchAqi(base, lat, lon, key) {
+    const v1Url = `${base}/airquality/v1/current/${lat}/${lon}?key=${key}`;
+    const v1 = await safeFetchJson(v1Url);
+    const v1Ok = v1 && v1.code === '200' && v1.indexes && v1.indexes.length > 0;
+    if (v1Ok) return v1;
+    // 回退旧版接口（location=经度,纬度）
+    const legacyUrl = `${base}/v7/air/now?location=${lon},${lat}&key=${key}`;
+    const legacy = await safeFetchJson(legacyUrl);
+    const legacyOk = legacy && legacy.code === '200' && legacy.now && legacy.now.aqi != null;
+    if (legacyOk) {
+      legacy._fromLegacy = true;
+      return legacy;
+    }
+    // 两个都不行时，优先返回更有信息量的错误（新版若只是无权限，保留它供展示）
+    return (v1 && v1.code && v1.code !== 'network_error') ? v1 : legacy;
+  }
+
   async function loadAllWeather() {
     const mySeq = ++loadSeq;
     showLoading();
@@ -499,8 +517,7 @@
       const nowPromise = safeFetchJson(`${base}/v7/weather/now?${commonParams}`);
       const hourlyPromise = safeFetchJson(`${base}/v7/weather/24h?${commonParams}`);
       const dailyPromise = safeFetchJson(`${base}/v7/weather/7d?${commonParams}`);
-      const aqiUrl = `${base}/airquality/v1/current/${currentLat}/${currentLon}?key=${key}`;
-      const aqiPromise = safeFetchJson(aqiUrl);
+      const aqiPromise = fetchAqi(base, currentLat, currentLon, key);
       const warningPromise = safeFetchJson(`${base}/v7/warning/now?${commonParams}`);
       const indicesPromise = safeFetchJson(`${base}/v7/indices/1d?${commonParams}&type=1,2,3,4,5,6,7,8,9`);
       const minutelyPromise = safeFetchJson(`${base}/v7/minutely/5m?${commonParams}`);
@@ -648,22 +665,34 @@
       aqiEl.innerText = data.code === '403' ? '需升级订阅' : `错误 ${data.code}`;
       return;
     }
-    if (data.indexes && data.indexes.length > 0) {
+
+    // 修复 Bug：兼容新版 indexes 与旧版 now 两种返回结构
+    let aqi = null, category = '', color = '';
+    if (data._fromLegacy && data.now) {
+      aqi = data.now.aqi;
+      category = data.now.category || '';
+      color = data.now.color || '';
+    } else if (data.indexes && data.indexes.length > 0) {
       const target = data.indexes.find(i => i.code === 'cn-mee') || data.indexes[0];
       if (target) {
-        aqiEl.innerText = `${target.aqi} (${target.category})`;
-        // 修复 Bug：用官方等级颜色做徽标，直观反映空气质量
-        if (target.color) {
-          aqiEl.style.background = target.color;
-          aqiEl.style.color = '#fff';
-          aqiEl.style.padding = '1px 8px';
-          aqiEl.style.borderRadius = '12px';
-        }
-        return;
+        aqi = target.aqi;
+        category = target.category || '';
+        color = target.color || '';
       }
     }
-    resetAqiStyle();
-    aqiEl.innerText = '暂不可用';
+
+    if (aqi == null) {
+      resetAqiStyle();
+      aqiEl.innerText = '暂不可用';
+      return;
+    }
+    aqiEl.innerText = `${aqi}${category ? ` (${category})` : ''}`;
+    if (color) {
+      aqiEl.style.background = color;
+      aqiEl.style.color = '#fff';
+      aqiEl.style.padding = '1px 8px';
+      aqiEl.style.borderRadius = '12px';
+    }
   }
 
   function renderWarning(data) {
