@@ -43,7 +43,7 @@
     .alert-title { font-weight: 700; color: #c2410c; display: flex; align-items: center; gap: 8px; }
     .alert-text { font-size: 14px; margin-top: 6px; color: #7c2d12; }
     .hourly-scroll { display: flex; overflow-x: auto; gap: 20px; padding-bottom: 8px; scroll-snap-type: x mandatory; }
-    .hour-item { flex: 0 0 70px; text-align: center; scroll-snap-align: start; }
+    .hour-item { flex: 0 0 auto; min-width: 70px; text-align: center; scroll-snap-align: start; }
     .hour-time { font-size: 14px; font-weight: 500; color: #4b5563; }
     .hour-temp { font-size: 20px; font-weight: 600; margin: 8px 0; }
     .hour-rain { font-size: 13px; color: #3b82f6; }
@@ -234,6 +234,9 @@
   let loadSeq = 0;
   // 修复 Bug：记录最近一次刷新时间，供回前台自动刷新判断
   let lastRefreshTime = 0;
+  // 修复 Bug：用户侧刷新节流，避免定时器+回前台+手动点击并发多轮请求触发 QPM 限制
+  let lastUserLoad = 0;
+  const USER_LOAD_THROTTLE = 5000;
 
   // DOM 元素
   const cityNameEl = document.getElementById('cityName');
@@ -304,6 +307,11 @@
     return null;
   }
 
+  // 修复 Bug：经纬度按官方文档截断到小数点后两位，避免传多余精度
+  function coord2(v) {
+    return Math.round(parseFloat(v) * 100) / 100;
+  }
+
   // ========== 反向地理编码（改用和风天气官方 API，更稳定） ==========
   async function fetchCityName(lat, lon) {
     const host = getQweatherHost();
@@ -312,7 +320,7 @@
     
     const base = host.replace(/\/+$/, '');
     // 和风天气城市查询 API 支持直接传入 "经度,纬度"
-    const url = `${base}/geo/v2/city/lookup?location=${lon},${lat}&key=${key}`;
+    const url = `${base}/geo/v2/city/lookup?location=${coord2(lon)},${coord2(lat)}&key=${key}`;
     try {
       const data = await safeFetchJson(url);
       if (data.code === '200' && data.location && data.location.length > 0) {
@@ -342,8 +350,8 @@
       const data = await safeFetchJson(url);
       if (data.code === '200' && data.location && data.location.length > 0) {
         const firstResult = data.location[0];
-        currentLat = parseFloat(firstResult.lat);
-        currentLon = parseFloat(firstResult.lon);
+        currentLat = coord2(parseFloat(firstResult.lat));
+        currentLon = coord2(parseFloat(firstResult.lon));
         currentCityName = firstResult.name;
         cityNameEl.innerText = currentCityName;
         weatherLoaded = true;
@@ -419,9 +427,12 @@
     if (navigator.geolocation) {
       navigator.geolocation.getCurrentPosition(
         async (pos) => {
+          // 修复 Bug：竞态——await 期间用户可能已手动搜索城市，此时丢弃定位结果
+          if (userChoseCity) return;
           currentLat = pos.coords.latitude;
           currentLon = pos.coords.longitude;
           const name = await fetchCityName(currentLat, currentLon);
+          if (userChoseCity) return;
           // 修复 Bug：获取地名失败时不污染本地缓存
           if (name) {
             currentCityName = name;
@@ -467,6 +478,12 @@
         } catch {
           errorBody = { code: String(res.status), msg: res.statusText };
         }
+        // 修复 Bug：统一错误结构。RFC 7807 的问题响应 { error:{status,title} } 同时补 code，
+        // 让旧式 code 判断（v7）与新式 error 判断（v1）两种消费方都能正确识别
+        if (errorBody && errorBody.error && errorBody.error.status) {
+          errorBody.code = String(errorBody.error.status);
+          errorBody.msg = errorBody.error.title || errorBody.error.detail || '';
+        }
         return errorBody;
       }
       return await res.json();
@@ -479,12 +496,13 @@
 
   // ========== 核心加载 ==========
   // 空气质量：仅使用新版 v1 接口。注意成功响应不含 code 字段，渲染时直接以 indexes 是否有效为准
-  async function fetchAqi(base, lat, lon, key) {
-    const v1Url = `${base}/airquality/v1/current/${lat}/${lon}?key=${key}`;
+  async function fetchAqi(base, lat, lon, key, force) {
+    const forceParam = force ? '&_force=1' : '';
+    const v1Url = `${base}/airquality/v1/current/${coord2(lat)}/${coord2(lon)}?key=${key}${forceParam}`;
     return await safeFetchJson(v1Url);
   }
 
-  async function loadAllWeather() {
+  async function loadAllWeather(force) {
     const mySeq = ++loadSeq;
     showLoading();
     try {
@@ -500,16 +518,18 @@
       }
 
       const base = host.replace(/\/+$/, '');
-      const commonParams = `location=${currentLon},${currentLat}&key=${key}`;
+      // 手动刷新（force）时加 _force=1，SW 会忽略预报缓存强制走网络（并剥掉该参数作缓存键）
+      const forceParam = force ? '&_force=1' : '';
+      const commonParams = `location=${coord2(currentLon)},${coord2(currentLat)}&key=${key}`;
 
-      const nowPromise = safeFetchJson(`${base}/v7/weather/now?${commonParams}`);
-      const hourlyPromise = safeFetchJson(`${base}/v7/weather/24h?${commonParams}`);
-      const dailyPromise = safeFetchJson(`${base}/v7/weather/7d?${commonParams}`);
-      const aqiPromise = fetchAqi(base, currentLat, currentLon, key);
-      const warningPromise = safeFetchJson(`${base}/v7/warning/now?${commonParams}`);
+      const nowPromise = safeFetchJson(`${base}/v7/weather/now?${commonParams}${forceParam}`);
+      const hourlyPromise = safeFetchJson(`${base}/v7/weather/24h?${commonParams}${forceParam}`);
+      const dailyPromise = safeFetchJson(`${base}/v7/weather/7d?${commonParams}${forceParam}`);
+      const aqiPromise = fetchAqi(base, currentLat, currentLon, key, force);
+      const warningPromise = safeFetchJson(`${base}/v7/warning/now?${commonParams}${forceParam}`);
       // 生活指数：舒适度(8)、穿衣(3)、感冒(9)、运动(1)、旅游(6)、紫外线(5)、空气污染扩散(10)、过敏(7)、化妆(13)、晾晒(14)、交通(15)、防晒(16)
-      const indicesPromise = safeFetchJson(`${base}/v7/indices/1d?${commonParams}&type=1,3,5,6,7,8,9,10,13,14,15,16`);
-      const minutelyPromise = safeFetchJson(`${base}/v7/minutely/5m?${commonParams}`);
+      const indicesPromise = safeFetchJson(`${base}/v7/indices/1d?${commonParams}${forceParam}&type=1,3,5,6,7,8,9,10,13,14,15,16`);
+      const minutelyPromise = safeFetchJson(`${base}/v7/minutely/5m?${commonParams}${forceParam}`);
 
       const [nowData, hourlyData, dailyData, aqiData, warningData, indicesData, minutelyData] = await Promise.all([
         nowPromise, hourlyPromise, dailyPromise, aqiPromise, warningPromise,
@@ -573,13 +593,21 @@
       return;
     }
     const hours = data.hourly.slice(0, 24);
+    // 修复 Bug：以真实当前小时判断“现在”，避免缓存导致首条其实是上一小时却显示“现在”
+    const currentHour = new Date().getHours();
+    let firstDate = null;
     hourlyContainer.innerHTML = '';
     hours.forEach((h, idx) => {
       const hour = h.fxTime ? extractHour(h.fxTime) : null;
+      const date = h.fxTime ? extractDate(h.fxTime) : null;
+      if (idx === 0) firstDate = date;
       let displayHour;
-      // 修复 Bug：去掉 hour === currentHour 判断，避免出现两个“现在”
       if (hour !== null) {
-        displayHour = idx === 0 ? '现在' : `${hour}:00`;
+        displayHour = hour === currentHour ? '现在' : `${hour}:00`;
+        // 修复 Bug：跨天时标注日期，避免 23:00→00:00 误解为同一天
+        if (date && firstDate && date !== firstDate) {
+          displayHour = `${date} ${displayHour}`;
+        }
       } else {
         displayHour = '--:00';
       }
@@ -666,10 +694,14 @@
       return;
     }
 
-    // 新版响应结构：indexes 数组（如 cn-mee / us-epa / qaqi），优先展示中国标准 cn-mee
+    // 新版响应结构：indexes 数组。优先中国标准 cn-mee，其次 us-epa，并排除 0-1 分制的 qaqi，
+    // 避免显示 0.9 (Excellent) 这类易误读的数值
     let aqi = null, category = '', color = null;
     if (data.indexes && data.indexes.length > 0) {
-      const target = data.indexes.find(i => i.code === 'cn-mee') || data.indexes[0];
+      const target = data.indexes.find(i => i.code === 'cn-mee')
+        || data.indexes.find(i => i.code === 'us-epa')
+        || data.indexes.find(i => i.code !== 'qaqi')
+        || data.indexes[0];
       if (target) {
         aqi = target.aqi;
         category = target.category || '';
@@ -872,10 +904,18 @@
   }
 
   // 修复 Bug：自动刷新。30 分钟一次 + 回到前台时刷新（距上次 >5 分钟）
+  // 用户侧触发（手动/定时/回前台）统一走节流，防止多路并发打爆 QPM
+  function throttledUserLoad(force) {
+    const now = Date.now();
+    if (now - lastUserLoad < USER_LOAD_THROTTLE) return;
+    lastUserLoad = now;
+    loadAllWeather(force);
+  }
+
   function startAutoRefresh() {
     setInterval(() => {
       if (weatherLoaded && getQweatherHost() && getQweatherKey()) {
-        loadAllWeather();
+        throttledUserLoad(false);
       }
     }, 30 * 60 * 1000);
 
@@ -884,7 +924,7 @@
           getQweatherHost() && getQweatherKey()) {
         const now = Date.now();
         if (!lastRefreshTime || now - lastRefreshTime > 5 * 60 * 1000) {
-          loadAllWeather();
+          throttledUserLoad(false);
         }
       }
     });
@@ -908,7 +948,8 @@
 
     refreshBtn.onclick = () => {
       if (weatherLoaded) {
-        loadAllWeather();
+        // 手动刷新：强制走网络（_force=1），忽略 SW 预报缓存
+        throttledUserLoad(true);
       } else {
         getCurrentPosition();
       }

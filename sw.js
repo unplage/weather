@@ -6,7 +6,9 @@
 const BASE_PATH = self.location.pathname.replace(/[^/]+$/, '');
 // 构建带项目标识的缓存名称，避免多项目冲突
 // 例如 '/pwa1/' -> 'pwa-cache-pwa1-v1'
-const CACHE_NAME = `pwa-cache${BASE_PATH.replace(/\//g, '-')}v7`;
+const CACHE_NAME = `pwa-cache${BASE_PATH.replace(/\//g, '-')}v8`;
+// 当前项目的缓存前缀（含子路径标识），用于清理时只删本项目的旧缓存
+const CACHE_PREFIX = `pwa-cache${BASE_PATH.replace(/\//g, '-')}`;
 
 // 预缓存资源列表（全部使用相对于当前 sw.js 的路径）
 const PRECACHE_URLS = [
@@ -29,6 +31,20 @@ function isStaticResource(url) {
 
 function isNavigateRequest(request) {
   return request.mode === 'navigate' || (request.method === 'GET' && request.destination === 'document');
+}
+
+// 修复 Bug：缓存前剥离 content-encoding / content-length / transfer-encoding。
+// fetch 层已自动解压 body，若保留 gzip 头会把“已解压的数据”再按 gzip 解一次导致缓存损坏
+function toCacheableResponse(response) {
+  const headers = new Headers(response.headers);
+  headers.delete('content-encoding');
+  headers.delete('content-length');
+  headers.delete('transfer-encoding');
+  return new Response(response.clone().body, {
+    status: response.status,
+    statusText: response.statusText,
+    headers
+  });
 }
 
 // ---------- 3. 安装阶段 ----------
@@ -54,8 +70,8 @@ self.addEventListener('activate', (event) => {
     caches.keys().then(cacheNames => {
       return Promise.all(
         cacheNames.map(cache => {
-          // 只删除以 'pwa-cache-' 开头且不属于当前项目的缓存
-          if (cache.startsWith('pwa-cache-') && cache !== CACHE_NAME) {
+          // 只删除当前项目的旧缓存版本（含子路径前缀，避免误删同源其他 PWA）
+          if (cache.startsWith(CACHE_PREFIX) && cache !== CACHE_NAME) {
             console.log('[SW] 删除旧缓存:', cache);
             return caches.delete(cache);
           }
@@ -81,8 +97,7 @@ self.addEventListener('fetch', (event) => {
       fetch(request)
         .then(networkResponse => {
           if (networkResponse && networkResponse.status === 200) {
-            const responseClone = networkResponse.clone();
-            caches.open(CACHE_NAME).then(cache => cache.put(request, responseClone));
+            caches.open(CACHE_NAME).then(cache => cache.put(request, toCacheableResponse(networkResponse)));
           }
           return networkResponse;
         })
@@ -116,8 +131,7 @@ self.addEventListener('fetch', (event) => {
         return fetch(request).then(networkResponse => {
           // 注意：跨域不透明响应 status 为 0，所以用 !networkResponse.ok 不可靠，直接判断是否存在即可
           if (networkResponse) {
-            const responseClone = networkResponse.clone();
-            caches.open(CACHE_NAME).then(cache => cache.put(request, responseClone));
+            caches.open(CACHE_NAME).then(cache => cache.put(request, toCacheableResponse(networkResponse)));
           }
           return networkResponse;
         }).catch(() => {
@@ -131,22 +145,30 @@ self.addEventListener('fetch', (event) => {
   const isWeatherAPI = url.hostname.endsWith('qweatherapi.com') || url.hostname.endsWith('qweather.com') || url.hostname === 'api.bigdatacloud.net';
 
   if (isWeatherAPI) {
-    // 修复 Bug：实时类接口（实况/空气质量/预警）改网络优先（stale-while-revalidate），保证手动刷新拿到最新值；
-    // 预报类接口（逐小时/逐日/分钟降水/指数）保持缓存优先，降低流量消耗。
+    // 修复 Bug：实时类接口（实况/空气质量/分钟降水/预警）改网络优先（stale-while-revalidate），保证刷新拿到最新值；
+    // 预报类接口（逐小时/逐日/指数）保持缓存优先，降低流量消耗。分钟降水数据约 10 分钟更新，不再缓存 1 小时。
     const isRealtimeAPI =
       url.pathname.includes('/v7/weather/now') ||
       url.pathname.includes('/airquality/') ||
+      url.pathname.includes('/v7/minutely/') ||
       url.pathname.includes('/v7/warning/now');
+
+    // 手动刷新（index 追加 _force=1）：忽略预报缓存强制走网络；
+    // 同时剥掉 _force 参数作为缓存键，避免缓存条目随每次刷新膨胀
+    const isForced = url.searchParams.get('_force') === '1';
+    const cleanUrl = new URL(url);
+    cleanUrl.searchParams.delete('_force');
+    const cacheKeyRequest = new Request(cleanUrl.toString(), { method: 'GET' });
 
     event.respondWith(
       caches.open(CACHE_NAME).then(async (cache) => {
-        const cachedResponse = await cache.match(request);
+        const cachedResponse = await cache.match(cacheKeyRequest);
 
-        if (isRealtimeAPI) {
+        if (isRealtimeAPI || isForced) {
           // 网络优先：能联网就取最新并回填缓存；离线/失败才回退缓存
-          return fetch(request).then((networkResponse) => {
+          return fetch(cacheKeyRequest).then((networkResponse) => {
             if (networkResponse && networkResponse.status === 200) {
-              cache.put(request, networkResponse.clone());
+              cache.put(cacheKeyRequest, toCacheableResponse(networkResponse));
             }
             return networkResponse;
           }).catch(() => {
@@ -159,15 +181,11 @@ self.addEventListener('fetch', (event) => {
         const cachedTime = cachedResponse ? parseInt(cachedResponse.headers.get('x-sw-cached-at') || '0', 10) : 0;
         const cacheFresh = cachedTime > 0 && (Date.now() - cachedTime) < CACHE_MAX_AGE;
 
-        const fetchPromise = fetch(request).then((networkResponse) => {
+        const fetchPromise = fetch(cacheKeyRequest).then((networkResponse) => {
           if (networkResponse && networkResponse.status === 200) {
-            const stamped = new Response(networkResponse.clone().body, {
-              status: networkResponse.status,
-              statusText: networkResponse.statusText,
-              headers: networkResponse.headers
-            });
+            const stamped = toCacheableResponse(networkResponse);
             stamped.headers.set('x-sw-cached-at', String(Date.now()));
-            cache.put(request, stamped);
+            cache.put(cacheKeyRequest, stamped);
           }
           return networkResponse;
         }).catch(() => {
