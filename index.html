@@ -10,7 +10,7 @@
   <meta name="mobile-web-app-capable" content="yes">
 
   <!-- 和风天气图标库 -->
-  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/qweather-icons@1.8.0/font/qweather-icons.css">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/qweather-icons@1.8.0/font/qweather-icons.css" integrity="sha384-TsXGvarQaEKM+t5lcNuENHRayesPS+C36oZcteKU7Iy3TYMudT/Ygs7IJKsAJJwC" crossorigin="anonymous">
 
   <style>
     * { margin: 0; padding: 0; box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
@@ -66,6 +66,7 @@
     .minutely-summary { font-size: 14px; color: #4b5563; margin-top: 10px; text-align: center; line-height: 1.5; }
     footer { text-align: center; font-size: 12px; color: #94a3b8; margin-top: 24px; }
     .loading { text-align: center; padding: 40px; color: #6c757d; }
+    .empty { text-align: center; color: #6c757d; font-size: 14px; padding: 12px 0; }
     button { background: none; border: none; }
     .settings-area { display: flex; align-items: center; gap: 8px; }
     .settings-btn { font-size: 22px; cursor: pointer; background: white; border-radius: 50%; width: 40px; height: 40px; display: flex; align-items: center; justify-content: center; box-shadow: 0 1px 3px rgba(0,0,0,0.05); transition: 0.2s; }
@@ -106,6 +107,7 @@
         <button class="settings-btn" id="settingsBtn" title="设置和风 API Host 与 Key">⚙️</button>
       </div>
       <button class="refresh-btn" id="refreshBtn">⟳</button>
+      <button class="settings-btn" id="installBtn" title="安装应用" style="display:none; width:36px; height:36px; font-size:18px;">⬇️</button>
     </div>
   </div>
 
@@ -129,6 +131,10 @@
       <div class="detail-item"><span class="detail-icon">🌬️</span><div><div class="detail-label">风速</div><div class="detail-value" id="windSpeed">--</div></div></div>
       <div class="detail-item"><span class="detail-icon">🌡️</span><div><div class="detail-label">体感</div><div class="detail-value" id="feelsLike">--°</div></div></div>
       <div class="detail-item"><span class="detail-icon">🫁</span><div><div class="detail-label">空气质量</div><div class="detail-value" id="aqi">--</div></div></div>
+      <div class="detail-item"><span class="detail-icon">☁️</span><div><div class="detail-label">云量</div><div class="detail-value" id="cloud">--</div></div></div>
+      <div class="detail-item"><span class="detail-icon">🌫️</span><div><div class="detail-label">能见度</div><div class="detail-value" id="visibility">--</div></div></div>
+      <div class="detail-item"><span class="detail-icon">🌀</span><div><div class="detail-label">气压</div><div class="detail-value" id="pressure">-- hPa</div></div></div>
+      <div class="detail-item"><span class="detail-icon">🌦️</span><div><div class="detail-label">降水</div><div class="detail-value" id="precip">-- mm</div></div></div>
     </div>
   </div>
 
@@ -223,6 +229,11 @@
   let currentLon = DEFAULT_LON;
   let currentCityName = '北京';
   let weatherLoaded = false;
+  let userChoseCity = false;
+  // 修复 Bug：请求序号守卫，防止快速切城/连点刷新时旧响应覆盖新数据
+  let loadSeq = 0;
+  // 修复 Bug：记录最近一次刷新时间，供回前台自动刷新判断
+  let lastRefreshTime = 0;
 
   // DOM 元素
   const cityNameEl = document.getElementById('cityName');
@@ -233,6 +244,11 @@
   const windSpeedEl = document.getElementById('windSpeed');
   const feelsLikeEl = document.getElementById('feelsLike');
   const aqiEl = document.getElementById('aqi');
+  const cloudEl = document.getElementById('cloud');
+  const visibilityEl = document.getElementById('visibility');
+  const pressureEl = document.getElementById('pressure');
+  const precipEl = document.getElementById('precip');
+  const installBtn = document.getElementById('installBtn');
   const alertCard = document.getElementById('alertCard');
   const alertContent = document.getElementById('alertContent');
   const hourlyContainer = document.getElementById('hourlyContainer');
@@ -256,12 +272,23 @@
   const cancelSettingsBtn = document.getElementById('cancelSettingsBtn');
 
   // ========== 图标生成 ==========
+  // 修复 Bug：iconCode 白名单校验，防止注入到 class 属性
+  const ICON_CODE_RE = /^[0-9]{3}$/;
   function getWeatherIcon(iconCode) {
-    if (!iconCode) return '🌡️';
+    if (!iconCode || !ICON_CODE_RE.test(iconCode)) return '🌡️';
     return `<i class="qi-${iconCode}"></i>`;
   }
 
   // ========== 辅助函数 ==========
+  // 修复 Bug：统一 HTML 转义，防止 XSS（api 数据一律经此输出）
+  function esc(s) {
+    return String(s == null ? '' : s)
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;')
+      .replace(/'/g, '&#39;');
+  }
   // 修复 Bug：直接使用正则提取，避免 new Date() 导致的跨时区时间偏移问题
   function extractHour(timeStr) {
     if (!timeStr) return null;
@@ -287,8 +314,7 @@
     // 和风天气城市查询 API 支持直接传入 "经度,纬度"
     const url = `${base}/geo/v2/city/lookup?location=${lon},${lat}&key=${key}`;
     try {
-      const res = await fetch(url);
-      const data = await res.json();
+      const data = await safeFetchJson(url);
       if (data.code === '200' && data.location && data.location.length > 0) {
         // 优先返回市级别名称，如果需要更详细可以改用 data.location[0].name
         return data.location[0].name; 
@@ -313,8 +339,7 @@
     const base = host.replace(/\/+$/, '');
     const url = `${base}/geo/v2/city/lookup?location=${encodeURIComponent(query)}&number=10&key=${key}`;
     try {
-      const response = await fetch(url);
-      const data = await response.json();
+      const data = await safeFetchJson(url);
       if (data.code === '200' && data.location && data.location.length > 0) {
         const firstResult = data.location[0];
         currentLat = parseFloat(firstResult.lat);
@@ -322,6 +347,7 @@
         currentCityName = firstResult.name;
         cityNameEl.innerText = currentCityName;
         weatherLoaded = true;
+        userChoseCity = true;
         localStorage.setItem('lastCity', JSON.stringify({
           lat: currentLat,
           lon: currentLon,
@@ -357,7 +383,39 @@
     return false;
   }
 
+  // 修复 Bug：IP 兜底定位，复用 SW 已白名单的 bigdatacloud 服务
+  // GPS 失败/被拒/不支持时调用，尽量不让用户手动找城市
+  async function getIpLocation() {
+    try {
+      const data = await safeFetchJson('https://api.bigdatacloud.net/data/reverse-geocode-client?localityLanguage=zh');
+      if (data && data.latitude != null && data.longitude != null) {
+        currentLat = data.latitude;
+        currentLon = data.longitude;
+        currentCityName = data.city || data.locality || data.principalSubdivision || '当前位置';
+        cityNameEl.innerText = currentCityName;
+        localStorage.setItem('lastCity', JSON.stringify({ lat: currentLat, lon: currentLon, name: currentCityName }));
+        weatherLoaded = true;
+        loadAllWeather();
+        return true;
+      }
+    } catch (e) {
+      console.warn('IP 定位失败:', e);
+    }
+    return false;
+  }
+
+  // 修复 Bug：两段式定位。先用低精度快速出数据，成功后静默升精度细化
   function getCurrentPosition() {
+    const tryFallbacks = (err) => {
+      console.warn('定位失败:', err);
+      getIpLocation().then(ok => {
+        if (!ok && !fallbackToLastCity()) {
+          cityNameEl.innerText = '📍 无法定位，请手动搜索';
+          weatherLoaded = false;
+        }
+      });
+    };
+
     if (navigator.geolocation) {
       navigator.geolocation.getCurrentPosition(
         async (pos) => {
@@ -374,28 +432,34 @@
           cityNameEl.innerText = currentCityName;
           weatherLoaded = true;
           loadAllWeather();
+          // 修复 Bug：后台用高精度再精确定位一次，覆盖低精度结果
+          navigator.geolocation.getCurrentPosition(
+            (pos2) => {
+              if (userChoseCity) return;
+              currentLat = pos2.coords.latitude;
+              currentLon = pos2.coords.longitude;
+              loadAllWeather();
+            },
+            () => {},
+            { enableHighAccuracy: true, timeout: 15000, maximumAge: 60000 }
+          );
         },
-        (err) => {
-          console.warn('定位失败:', err);
-          if (!fallbackToLastCity()) {
-            cityNameEl.innerText = '📍 无法定位，请手动搜索';
-            weatherLoaded = false;
-          }
-        },
-        { enableHighAccuracy: true, timeout: 8000, maximumAge: 60000 }
+        tryFallbacks,
+        { enableHighAccuracy: false, timeout: 8000, maximumAge: 60000 }
       );
     } else {
-      if (!fallbackToLastCity()) {
-        cityNameEl.innerText = '📍 浏览器不支持定位，请手动搜索';
-        weatherLoaded = false;
-      }
+      tryFallbacks(new Error('geolocation 不支持'));
     }
   }
 
   // ========== 安全请求 ==========
+  // 修复 Bug：加入 AbortController 超时，避免请求挂起导致整页一直"加载中"
+  const FETCH_TIMEOUT = 12000;
   async function safeFetchJson(url) {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), FETCH_TIMEOUT);
     try {
-      const res = await fetch(url);
+      const res = await fetch(url, { signal: controller.signal });
       if (!res.ok) {
         let errorBody;
         try {
@@ -407,12 +471,15 @@
       }
       return await res.json();
     } catch (e) {
-      return { code: 'network_error', msg: e.message };
+      return { code: 'network_error', msg: e.name === 'AbortError' ? '请求超时' : e.message };
+    } finally {
+      clearTimeout(timer);
     }
   }
 
   // ========== 核心加载 ==========
   async function loadAllWeather() {
+    const mySeq = ++loadSeq;
     showLoading();
     try {
       const host = getQweatherHost();
@@ -435,13 +502,16 @@
       const aqiUrl = `${base}/airquality/v1/current/${currentLat}/${currentLon}?key=${key}`;
       const aqiPromise = safeFetchJson(aqiUrl);
       const warningPromise = safeFetchJson(`${base}/v7/warning/now?${commonParams}`);
-      const indicesPromise = safeFetchJson(`${base}/v7/indices/1d?${commonParams}&type=1,2,3,5,6,7,8,9`);
+      const indicesPromise = safeFetchJson(`${base}/v7/indices/1d?${commonParams}&type=1,2,3,4,5,6,7,8,9`);
       const minutelyPromise = safeFetchJson(`${base}/v7/minutely/5m?${commonParams}`);
 
       const [nowData, hourlyData, dailyData, aqiData, warningData, indicesData, minutelyData] = await Promise.all([
         nowPromise, hourlyPromise, dailyPromise, aqiPromise, warningPromise,
         indicesPromise, minutelyPromise
       ]);
+
+      // 修复 Bug：若期间又发起了新请求，丢弃本次过期结果，避免错位渲染
+      if (mySeq !== loadSeq) return;
 
       renderCurrentWeather(nowData);
       renderHourly(hourlyData);
@@ -451,11 +521,15 @@
       renderIndices(indicesData);
       renderMinutely(minutelyData);
 
+      lastRefreshTime = Date.now();
     } catch (error) {
+      if (mySeq !== loadSeq) return;
       console.error(error);
       alert('天气数据加载失败，请检查网络或配置');
     } finally {
-      hideLoading();
+      if (mySeq === loadSeq) {
+        hideLoading();
+      }
     }
   }
 
@@ -468,20 +542,28 @@
       humidityEl.innerText = '--%';
       windSpeedEl.innerText = '--';
       feelsLikeEl.innerText = '--°';
+      cloudEl.innerText = '--';
+      visibilityEl.innerText = '--';
+      pressureEl.innerText = '-- hPa';
+      precipEl.innerText = '-- mm';
       return;
     }
     const now = data.now;
-    tempNowEl.innerHTML = `${now.temp}<small>°</small>`;
-    weatherDescEl.innerHTML = `${getWeatherIcon(now.icon)} ${now.text}`;
-    highLowEl.innerHTML = `体感 ${now.feelsLike}°`;
+    tempNowEl.innerHTML = `${esc(now.temp)}<small>°</small>`;
+    weatherDescEl.innerHTML = `${getWeatherIcon(now.icon)} ${esc(now.text)}`;
+    highLowEl.innerHTML = `体感 ${esc(now.feelsLike)}°`;
     humidityEl.innerText = `${now.humidity}%`;
     windSpeedEl.innerText = `${now.windDir} ${now.windScale}级`;
     feelsLikeEl.innerText = `${now.feelsLike}°`;
+    cloudEl.innerText = `${now.cloud}%`;
+    visibilityEl.innerText = `${now.vis} km`;
+    pressureEl.innerText = `${now.pressure} hPa`;
+    precipEl.innerText = `${now.precip} mm`;
   }
 
   function renderHourly(data) {
     if (!data || data.code !== '200' || !data.hourly || data.hourly.length === 0) {
-      hourlyContainer.innerHTML = '<div class="loading">暂无小时预报</div>';
+      hourlyContainer.innerHTML = '<div class="empty">暂无小时预报</div>';
       return;
     }
     const hours = data.hourly.slice(0, 24);
@@ -497,11 +579,13 @@
       }
       const div = document.createElement('div');
       div.className = 'hour-item';
+      // 修复 Bug：wind 信息放入 tooltip，不撑爆布局
+      div.title = `${h.text || ''} · ${h.windDir || ''}${h.windScale ? h.windScale + '级' : ''} · 降水 ${h.pop || 0}% · 雨量 ${h.precip || 0} mm`;
       div.innerHTML = `
-        <div class="hour-time">${displayHour}</div>
+        <div class="hour-time">${esc(displayHour)}</div>
         <div class="hour-icon">${getWeatherIcon(h.icon)}</div>
-        <div class="hour-temp">${h.temp}°</div>
-        <div class="hour-rain">💧${h.pop || 0}%</div>
+        <div class="hour-temp">${esc(h.temp)}°</div>
+        <div class="hour-rain">💧${esc(h.pop || 0)}%</div>
       `;
       hourlyContainer.appendChild(div);
     });
@@ -509,7 +593,7 @@
 
   function renderDaily(data) {
     if (!data || data.code !== '200' || !data.daily || data.daily.length === 0) {
-      dailyContainer.innerHTML = '<div class="loading">暂无逐日预报</div>';
+      dailyContainer.innerHTML = '<div class="empty">暂无逐日预报</div>';
       return;
     }
     dailyContainer.innerHTML = '';
@@ -525,11 +609,21 @@
       row.className = 'daily-row';
       const iconCode = d.iconDay || d.icon;
       const weatherText = d.textDay || d.text || '';
+      // 修复 Bug：pop/uv/日出日落放入 tooltip，不撑爆布局
+      const tooltip = [
+        d.textNight ? `夜间 ${d.textNight}` : '',
+        d.pop ? `降水概率 ${d.pop}%` : '',
+        d.uvIndex ? `紫外线 ${d.uvIndex}` : '',
+        d.humidity ? `湿度 ${d.humidity}%` : '',
+        d.sunrise && d.sunset ? `日出 ${d.sunrise} · 日落 ${d.sunset}` : '',
+        d.windDirDay ? `${d.windDirDay}风 ${d.windScaleDay || ''}级` : ''
+      ].filter(Boolean).join(' · ');
+      if (tooltip) row.title = tooltip;
       row.innerHTML = `
-        <div class="daily-date">${dateDisplay}</div>
+        <div class="daily-date">${esc(dateDisplay)}</div>
         <div class="daily-icon">${getWeatherIcon(iconCode)}</div>
         <div style="flex:1; text-align:left; padding-left:8px; font-size:14px; color:#4b5563;" class="daily-text"></div>
-        <div class="daily-temp">${d.tempMax}° / ${d.tempMin}°</div>
+        <div class="daily-temp">${esc(d.tempMax)}° / ${esc(d.tempMin)}°</div>
       `;
       // 修复 Bug：安全处理文本，防止 XSS
       row.querySelector('.daily-text').textContent = weatherText;
@@ -538,11 +632,19 @@
   }
 
   function renderAqi(data) {
+    const resetAqiStyle = () => {
+      aqiEl.style.background = '';
+      aqiEl.style.color = '';
+      aqiEl.style.padding = '';
+      aqiEl.style.borderRadius = '';
+    };
     if (!data || data.code === 'network_error') {
+      resetAqiStyle();
       aqiEl.innerText = '无数据';
       return;
     }
     if (data.code && data.code !== '200') {
+      resetAqiStyle();
       aqiEl.innerText = data.code === '403' ? '需升级订阅' : `错误 ${data.code}`;
       return;
     }
@@ -550,20 +652,41 @@
       const target = data.indexes.find(i => i.code === 'cn-mee') || data.indexes[0];
       if (target) {
         aqiEl.innerText = `${target.aqi} (${target.category})`;
+        // 修复 Bug：用官方等级颜色做徽标，直观反映空气质量
+        if (target.color) {
+          aqiEl.style.background = target.color;
+          aqiEl.style.color = '#fff';
+          aqiEl.style.padding = '1px 8px';
+          aqiEl.style.borderRadius = '12px';
+        }
         return;
       }
     }
+    resetAqiStyle();
     aqiEl.innerText = '暂不可用';
   }
 
   function renderWarning(data) {
     if (!data || data.code !== '200' || !data.warning || data.warning.length === 0) {
       alertCard.style.display = 'none';
+      alertContent.innerHTML = '';
       return;
     }
-    const warn = data.warning[0];
-    // 修复 Bug：安全处理文本
-    alertContent.textContent = `${warn.title} · ${warn.level} · ${warn.text}`;
+    // 修复 Bug：展示全部预警，而非只取第一条
+    alertContent.innerHTML = '';
+    data.warning.forEach(warn => {
+      const item = document.createElement('div');
+      item.style.marginBottom = '6px';
+      // 修复 Bug：安全处理文本
+      const title = document.createElement('div');
+      title.style.fontWeight = '600';
+      title.textContent = `${warn.title} · ${warn.level}`;
+      const text = document.createElement('div');
+      text.textContent = warn.text || '';
+      item.appendChild(title);
+      item.appendChild(text);
+      alertContent.appendChild(item);
+    });
     alertCard.style.display = 'block';
   }
 
@@ -702,6 +825,11 @@
   function saveSettings() {
     const host = apiHostInput.value.trim();
     const key = apiKeyInput.value.trim();
+    // 修复 Bug：校验 host 必须是 https 完整地址，避免手误导致所有请求失败
+    if (host && !/^https:\/\//i.test(host)) {
+      alert('API Host 必须以 https:// 开头（例如 https://m33wt3jj26.re.qweatherapi.com）');
+      return;
+    }
     setQweatherHost(host);
     setQweatherKey(key);
     closeSettings();
@@ -712,13 +840,40 @@
     }
   }
 
+  // 修复 Bug：自动刷新。30 分钟一次 + 回到前台时刷新（距上次 >5 分钟）
+  function startAutoRefresh() {
+    setInterval(() => {
+      if (weatherLoaded && getQweatherHost() && getQweatherKey()) {
+        loadAllWeather();
+      }
+    }, 30 * 60 * 1000);
+
+    document.addEventListener('visibilitychange', () => {
+      if (document.visibilityState === 'visible' && weatherLoaded &&
+          getQweatherHost() && getQweatherKey()) {
+        const now = Date.now();
+        if (!lastRefreshTime || now - lastRefreshTime > 5 * 60 * 1000) {
+          loadAllWeather();
+        }
+      }
+    });
+  }
+
   // ========== 初始化 ==========
   function init() {
     updateStatus();
 
-    cityNameEl.innerText = '定位中...';
-    weatherLoaded = false;
-    getCurrentPosition();
+    // 修复 Bug：先检查配置，未配置先弹设置，避免先请求定位
+    const hasConfig = getQweatherHost() && getQweatherKey();
+    if (!hasConfig) {
+      openSettings();
+      cityNameEl.innerText = '请先设置 API Host 和 Key';
+      weatherLoaded = false;
+    } else {
+      cityNameEl.innerText = '定位中...';
+      weatherLoaded = false;
+      getCurrentPosition();
+    }
 
     refreshBtn.onclick = () => {
       if (weatherLoaded) {
@@ -738,6 +893,26 @@
     settingsOverlay.addEventListener('click', (e) => {
       if (e.target === settingsOverlay) closeSettings();
     });
+
+    // 修复 Bug：安装引导，捕获 beforeinstallprompt 显示安装按钮
+    let deferredPrompt = null;
+    window.addEventListener('beforeinstallprompt', (e) => {
+      e.preventDefault();
+      deferredPrompt = e;
+      installBtn.style.display = 'flex';
+    });
+    installBtn.onclick = async () => {
+      if (!deferredPrompt) return;
+      deferredPrompt.prompt();
+      await deferredPrompt.userChoice;
+      deferredPrompt = null;
+      installBtn.style.display = 'none';
+    };
+    window.addEventListener('appinstalled', () => {
+      installBtn.style.display = 'none';
+    });
+
+    startAutoRefresh();
 
     if ('serviceWorker' in navigator) {
       navigator.serviceWorker.register('./sw.js')

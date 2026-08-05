@@ -6,7 +6,7 @@
 const BASE_PATH = self.location.pathname.replace(/[^/]+$/, '');
 // 构建带项目标识的缓存名称，避免多项目冲突
 // 例如 '/pwa1/' -> 'pwa-cache-pwa1-v1'
-const CACHE_NAME = `pwa-cache${BASE_PATH.replace(/\//g, '-')}v4`;
+const CACHE_NAME = `pwa-cache${BASE_PATH.replace(/\//g, '-')}v5`;
 
 // 预缓存资源列表（全部使用相对于当前 sw.js 的路径）
 const PRECACHE_URLS = [
@@ -127,25 +127,40 @@ self.addEventListener('fetch', (event) => {
     );
     return;
   }
-  // ----- 5.3 API 请求（和风天气数据）：缓存优先，后台更新 -----
+  // ----- 5.3 API 请求（和风天气数据）：缓存优先（带 TTL），后台更新 -----
   const isWeatherAPI = url.hostname.endsWith('qweatherapi.com') || url.hostname.endsWith('qweather.com') || url.hostname === 'api.bigdatacloud.net';
-  
+
   if (isWeatherAPI) {
     event.respondWith(
       caches.open(CACHE_NAME).then(async (cache) => {
         const cachedResponse = await cache.match(request);
+
+        // 修复 Bug：给缓存附加时间戳头，超过 TTL 则优先走网络，避免离线数天仍显示旧"实时"数据
+        const CACHE_MAX_AGE = 60 * 60 * 1000; // 1 小时
+        const cachedTime = cachedResponse ? parseInt(cachedResponse.headers.get('x-sw-cached-at') || '0', 10) : 0;
+        const cacheFresh = cachedTime > 0 && (Date.now() - cachedTime) < CACHE_MAX_AGE;
+
         const fetchPromise = fetch(request).then((networkResponse) => {
-          // 成功获取则更新缓存
+          // 成功获取则更新缓存（带上时间戳头）
           if (networkResponse && networkResponse.status === 200) {
-            cache.put(request, networkResponse.clone());
+            const stamped = new Response(networkResponse.clone().body, {
+              status: networkResponse.status,
+              statusText: networkResponse.statusText,
+              headers: networkResponse.headers
+            });
+            stamped.headers.set('x-sw-cached-at', String(Date.now()));
+            cache.put(request, stamped);
           }
           return networkResponse;
         }).catch(() => {
           // 离线不做处理，返回 undefined 让外层走缓存
         });
 
-        // 如果有缓存，立即返回缓存，同时后台发起网络请求更新
-        return cachedResponse || fetchPromise || new Response('{"code":"offline"}', { status: 503 });
+        // 缓存未过期则立即返回缓存并后台更新；过期则等网络（网络失败仍回退缓存）
+        if (cachedResponse && cacheFresh) {
+          return cachedResponse;
+        }
+        return fetchPromise || cachedResponse || new Response('{"code":"offline"}', { status: 503 });
       })
     );
     return;
