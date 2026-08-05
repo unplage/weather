@@ -478,22 +478,10 @@
   }
 
   // ========== 核心加载 ==========
-  // 修复 Bug：空气质量先试新版接口，失败/无权限时回退旧版 v7/air/now（免费订阅可用）
+  // 空气质量：仅使用新版 v1 接口。注意成功响应不含 code 字段，渲染时直接以 indexes 是否有效为准
   async function fetchAqi(base, lat, lon, key) {
     const v1Url = `${base}/airquality/v1/current/${lat}/${lon}?key=${key}`;
-    const v1 = await safeFetchJson(v1Url);
-    const v1Ok = v1 && v1.code === '200' && v1.indexes && v1.indexes.length > 0;
-    if (v1Ok) return v1;
-    // 回退旧版接口（location=经度,纬度）
-    const legacyUrl = `${base}/v7/air/now?location=${lon},${lat}&key=${key}`;
-    const legacy = await safeFetchJson(legacyUrl);
-    const legacyOk = legacy && legacy.code === '200' && legacy.now && legacy.now.aqi != null;
-    if (legacyOk) {
-      legacy._fromLegacy = true;
-      return legacy;
-    }
-    // 两个都不行时，优先返回更有信息量的错误（新版若只是无权限，保留它供展示）
-    return (v1 && v1.code && v1.code !== 'network_error') ? v1 : legacy;
+    return await safeFetchJson(v1Url);
   }
 
   async function loadAllWeather() {
@@ -519,7 +507,8 @@
       const dailyPromise = safeFetchJson(`${base}/v7/weather/7d?${commonParams}`);
       const aqiPromise = fetchAqi(base, currentLat, currentLon, key);
       const warningPromise = safeFetchJson(`${base}/v7/warning/now?${commonParams}`);
-      const indicesPromise = safeFetchJson(`${base}/v7/indices/1d?${commonParams}&type=1,2,3,4,5,6,7,8,9`);
+      // 生活指数：舒适度(8)、穿衣(3)、感冒(9)、运动(1)、旅游(6)、紫外线(5)、空气污染扩散(10)、过敏(7)、化妆(13)、晾晒(14)、交通(15)、防晒(16)
+      const indicesPromise = safeFetchJson(`${base}/v7/indices/1d?${commonParams}&type=1,3,5,6,7,8,9,10,13,14,15,16`);
       const minutelyPromise = safeFetchJson(`${base}/v7/minutely/5m?${commonParams}`);
 
       const [nowData, hourlyData, dailyData, aqiData, warningData, indicesData, minutelyData] = await Promise.all([
@@ -660,24 +649,31 @@
       aqiEl.innerText = '无数据';
       return;
     }
+    // 新版 v1 接口错误为 RFC 7807：HTTP 状态码 + { error: { status, title } }
+    if (data.error && data.error.status) {
+      resetAqiStyle();
+      const status = data.error.status;
+      if (status === 400) aqiEl.innerText = '该位置暂无空气质量数据';
+      else if (status === 401) aqiEl.innerText = 'Key 无效';
+      else if (status === 403) aqiEl.innerText = '需升级订阅或额度不足';
+      else aqiEl.innerText = `错误 ${status}`;
+      return;
+    }
+    // 兼容旧式错误（非 JSON 响应体时 safeFetchJson 返回的 { code }）
     if (data.code && data.code !== '200') {
       resetAqiStyle();
       aqiEl.innerText = data.code === '403' ? '需升级订阅' : `错误 ${data.code}`;
       return;
     }
 
-    // 修复 Bug：兼容新版 indexes 与旧版 now 两种返回结构
-    let aqi = null, category = '', color = '';
-    if (data._fromLegacy && data.now) {
-      aqi = data.now.aqi;
-      category = data.now.category || '';
-      color = data.now.color || '';
-    } else if (data.indexes && data.indexes.length > 0) {
+    // 新版响应结构：indexes 数组（如 cn-mee / us-epa / qaqi），优先展示中国标准 cn-mee
+    let aqi = null, category = '', color = null;
+    if (data.indexes && data.indexes.length > 0) {
       const target = data.indexes.find(i => i.code === 'cn-mee') || data.indexes[0];
       if (target) {
         aqi = target.aqi;
         category = target.category || '';
-        color = target.color || '';
+        color = target.color || null;
       }
     }
 
@@ -688,7 +684,13 @@
     }
     aqiEl.innerText = `${aqi}${category ? ` (${category})` : ''}`;
     if (color) {
-      aqiEl.style.background = color;
+      // 新版 color 是 RGBA 对象 { red, green, blue, alpha }，转成 CSS 颜色
+      let cssColor = color;
+      if (typeof color === 'object' && color.red != null) {
+        const { red, green, blue, alpha = 1 } = color;
+        cssColor = `rgba(${red}, ${green}, ${blue}, ${alpha})`;
+      }
+      aqiEl.style.background = cssColor;
       aqiEl.style.color = '#fff';
       aqiEl.style.padding = '1px 8px';
       aqiEl.style.borderRadius = '12px';
@@ -726,7 +728,7 @@
     }
     indicesCard.style.display = 'block';
     indicesGrid.innerHTML = '';
-    data.daily.slice(0, 8).forEach(item => {
+    data.daily.forEach(item => {
       const div = document.createElement('div');
       div.className = 'index-item';
       div.innerHTML = `

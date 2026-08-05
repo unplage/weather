@@ -6,7 +6,7 @@
 const BASE_PATH = self.location.pathname.replace(/[^/]+$/, '');
 // 构建带项目标识的缓存名称，避免多项目冲突
 // 例如 '/pwa1/' -> 'pwa-cache-pwa1-v1'
-const CACHE_NAME = `pwa-cache${BASE_PATH.replace(/\//g, '-')}v6`;
+const CACHE_NAME = `pwa-cache${BASE_PATH.replace(/\//g, '-')}v7`;
 
 // 预缓存资源列表（全部使用相对于当前 sw.js 的路径）
 const PRECACHE_URLS = [
@@ -136,7 +136,6 @@ self.addEventListener('fetch', (event) => {
     const isRealtimeAPI =
       url.pathname.includes('/v7/weather/now') ||
       url.pathname.includes('/airquality/') ||
-      url.pathname.includes('/v7/air/now') ||
       url.pathname.includes('/v7/warning/now');
 
     event.respondWith(
