@@ -142,7 +142,7 @@
 
     <label for="apiKeyInput">API Key</label>
     <input type="password" id="apiKeyInput" placeholder="您的和风天气 Key" autocomplete="off" spellcheck="false" aria-describedby="keyHint">
-    <div class="hint" id="keyHint">默认通过请求头 <code>X-QW-Api-Key</code> 发送；保存时会自动校验</div>
+    <div class="hint" id="keyHint">鉴权使用请求参数 <code>?key=</code>（与 SW 缓存键剥离兼容）；保存时会自动校验</div>
 
     <div class="settings-actions">
       <button class="btn-secondary" id="cancelSettingsBtn" type="button">取消</button>

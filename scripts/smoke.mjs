@@ -37,7 +37,7 @@ ok(js.includes('function loadAllWeather'), 'app.js 含 loadAllWeather');
 ok(css.includes(':root'), 'styles.css 含主题变量');
 
 console.log('== 17 项优化抽查 ==');
-ok(js.includes('X-QW-Api-Key'), '① Key 走 header');
+ok(js.includes('X-QW-Api-Key') || js.includes("searchParams.set('key'"), '① Key 鉴权（query 为主）');
 ok(js.includes('probeQweather'), '⑪ 保存即探测');
 ok(js.includes('429'), '⑫ 429 限额提示');
 ok(html.includes('attrToggle') || js.includes('attrToggle'), '② 归因折叠');
@@ -70,11 +70,12 @@ ok(js.includes('/airquality/v1/current'), 'AQI 用 airquality/v1');
 ok(js.includes('lang=zh-hans') || js.includes("lang: 'zh-hans'") || /lang.*zh-hans/.test(js), '带 lang=zh-hans');
 
 console.log('== SW 缓存规则 ==');
-ok(/v12/.test(sw), 'CACHE_NAME 升至 v12');
+ok(/v13/.test(sw), 'CACHE_NAME 升至 v13');
 ok(sw.includes('styles.css') && sw.includes('app.js'), '预缓存 styles.css/app.js');
+ok(sw.includes("cache: 'reload'"), '预缓存绕过 HTTP 缓存');
+ok(sw.includes('fetch(request)') && sw.includes('isSameOriginStatic'), '同源 JS/CSS 网络优先');
 ok(sw.includes("searchParams.delete('_force')"), '剥离 _force');
 ok(sw.includes("searchParams.delete('key')"), '缓存键剥离 key');
-ok(sw.includes('X-QW-Api-Key') || sw.includes('request.headers'), '透传请求头');
 ok(!/url\.origin !== location\.origin\s*→?\s*return/.test(sw), '无同源早退死代码');
 
 console.log('== 其他完整性 ==');
@@ -84,11 +85,12 @@ ok(js.includes('WIND_COMPASS'), '保留 WIND_COMPASS');
 ok(/iconCode/.test(js), '保留 icon 白名单');
 ok(html.includes('id="keyStatus"'), 'keyStatus 元素存在');
 ok(html.includes('id="settingsOverlay"'), 'settingsOverlay 元素存在');
-ok(agents.includes('v12'), 'AGENTS 已记录 v12');
+ok(agents.includes('v13'), 'AGENTS 已记录 v13');
 ok(js.includes('LOCATE_WATCHDOG_MS'), '定位看门狗');
-ok(js.includes('authFallbackTried'), 'header→query 自动回退');
+ok(js.includes("getQweatherAuth()") && js.includes("return 'query'"), '鉴权固定 query');
 ok(/getQweatherHost[\s\S]*https:\/\//.test(js), 'Host 自动补全 https://');
 ok(js.includes('safeRender') && js.includes('buildApiUrl'), '加载失败不因单点 throw 整页炸');
+ok(js.includes('coreAllBad') && js.includes('errCode'), '核心接口失败带真实错误码');
 
 console.log('');
 console.log(`结果: ${passed} 通过, ${failed} 失败`);

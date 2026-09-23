@@ -22,7 +22,7 @@
 本应用不内置 API 凭据。使用前需点击页面右上角齿轮 ⚙️ 填写：
 
 1. **API Host**：和风天气控制台中的**专属域名**（如 `https://m33wt3jj26.re.qweatherapi.com`），**不是** `devapi.qweather.com`。
-2. **API Key**：您的和风天气 Key（保存时自动探测校验；默认经 `X-QW-Api-Key` 请求头发送，必要时自动回退 `?key=`）。
+2. **API Key**：您的和风天气 Key（保存时自动探测校验；统一经请求参数 `?key=` 发送）。
 
 配置保存在浏览器 `localStorage`（`qweather_host` / `qweather_key` 等）。未配置时会直接拦截请求并弹出设置面板，不会 fallback 到 devapi。
 

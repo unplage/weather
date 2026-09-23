@@ -5,8 +5,8 @@
 // 获取当前 sw.js 所在的目录路径（例如 '/weather/'）
 const BASE_PATH = self.location.pathname.replace(/[^/]+$/, '');
 // 构建带项目标识的缓存名称，避免多项目冲突（每次改应用代码必须递增版本号）
-const CACHE_NAME = `pwa-cache${BASE_PATH.replace(/\//g, '-')}v12`;
-// 当前项目的缓存前缀（含子路径标识），用于清理时只删本项目的旧缓存
+const CACHE_NAME = `pwa-cache${BASE_PATH.replace(/\//g, '-')}v13`;
+// 当前项目的缓存前缀（含子路径标识），清理时只删本项目的旧缓存
 const CACHE_PREFIX = `pwa-cache${BASE_PATH.replace(/\//g, '-')}`;
 
 // 天气 API 缓存 TTL：5 分钟内同城市（同 URL）刷新可复用；超时/换城市/强制刷新走网络
@@ -20,6 +20,11 @@ const PRECACHE_URLS = [
   `${BASE_PATH}styles.css`,
   `${BASE_PATH}app.js`,
 ];
+
+// 预缓存时绕过 HTTP 缓存（GitHub Pages max-age=600 会把旧 app.js 塞进新 SW 缓存）
+function precacheBypass(url) {
+  return new Request(url, { cache: 'reload' });
+}
 
 // 静态资源扩展名（用于判断是否缓存优先）
 const STATIC_EXTENSIONS = ['js', 'css', 'png', 'jpg', 'jpeg', 'gif', 'svg', 'webp', 'woff', 'woff2', 'ttf', 'eot', 'ico'];
@@ -77,9 +82,9 @@ self.addEventListener('install', (event) => {
     caches.open(CACHE_NAME)
       .then(cache => {
         console.log('[SW] 预缓存资源:', PRECACHE_URLS);
-        // 使用 allSettled 忽略单个资源失败
+        // 使用 allSettled 忽略单个资源失败；cache:'reload' 绕开 HTTP 缓存拿最新 app.js
         return Promise.allSettled(
-          PRECACHE_URLS.map(url => cache.add(url).catch(err => console.warn(`预缓存失败 ${url}:`, err)))
+          PRECACHE_URLS.map(url => cache.add(precacheBypass(url)).catch(err => console.warn(`预缓存失败 ${url}:`, err)))
         );
       })
       .then(() => self.skipWaiting()) // 立即激活
@@ -150,8 +155,26 @@ self.addEventListener('fetch', (event) => {
     return;
   }
 
-  // ----- 5.2 静态资源请求：缓存优先，未命中则网络请求并缓存 -----
-  if (isStaticResource(url) && (isSameOrigin || isAllowedCDN)) {
+  // ----- 5.2 同源 JS/CSS：网络优先（在线永远吃到新版，防 SW 旧缓存卡死），失败回退缓存 -----
+  // CDN 图标字体仍缓存优先（体积小、版本钉死）
+  const isSameOriginStatic = isStaticResource(url) && isSameOrigin;
+  if (isSameOriginStatic) {
+    event.respondWith(
+      fetch(request).then(networkResponse => {
+        if (networkResponse && networkResponse.status === 200) {
+          caches.open(CACHE_NAME).then(cache => cache.put(request, toCacheableResponse(networkResponse)));
+        }
+        return networkResponse;
+      }).catch(async () => {
+        const cachedResponse = await caches.match(request);
+        if (cachedResponse) return cachedResponse;
+        return new Response('', { status: 408 });
+      })
+    );
+    return;
+  }
+
+  if (isStaticResource(url) && isAllowedCDN) {
     event.respondWith(
       caches.match(request).then(cachedResponse => {
         if (cachedResponse) {
@@ -172,8 +195,8 @@ self.addEventListener('fetch', (event) => {
 
   // ----- 5.3 天气 API：5 分钟同城市缓存，超时/_force 实时 -----
   // 缓存键 = 剥掉 _force 与 key 后的 URL（含 location/路径经纬度）→ 换城市天然不命中。
-  // key 从缓存键剥离：header 鉴权时不在 URL；query 鉴权时不因换 Key 导致缓存穿透。
-  // 网络请求仍保留原始 URL（含 query key）与原始请求头（含 X-QW-Api-Key）。
+  // key 从缓存键剥离：query 鉴权时不因换 Key 导致缓存穿透。
+  // 网络请求保留原始 URL（含 query key）。
   const isForced = url.searchParams.get('_force') === '1';
 
   const cacheKeyUrl = new URL(url.href);
@@ -183,7 +206,7 @@ self.addEventListener('fetch', (event) => {
 
   const fetchUrl = new URL(url.href);
   fetchUrl.searchParams.delete('_force');
-  // 透传页面发起的鉴权头（header 模式）与模式等；勿用空 headers 覆盖
+  // 保留原始请求头与 mode；勿用空 headers 覆盖
   const networkRequestInit = {
     method: request.method,
     headers: request.headers,

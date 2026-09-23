@@ -3,16 +3,14 @@
 
 // ========== localStorage schema 版本（优化 #16）==========
 const STORAGE_SCHEMA_KEY = 'schema_version';
-const STORAGE_SCHEMA = 2; // v2: 新增 qweather_auth / temp_unit / theme / favorites / recents
+const STORAGE_SCHEMA = 3; // v3: 统一回 query 鉴权（header 经 SW/CORS 预检易整批失败）
 
 function migrateStorage() {
   try {
     const v = parseInt(localStorage.getItem(STORAGE_SCHEMA_KEY) || '0', 10);
     if (v >= STORAGE_SCHEMA) return;
-    // v1→v2：老用户原本走 ?key=，无 auth 标记时默认 query，保持行为不变
-    if (!localStorage.getItem('qweather_auth')) {
-      localStorage.setItem('qweather_auth', 'query');
-    }
+    // 统一 ?key=：与旧版可工作路径一致；header 模式在 SW 代理下易 CORS 失败
+    localStorage.setItem('qweather_auth', 'query');
     localStorage.setItem(STORAGE_SCHEMA_KEY, String(STORAGE_SCHEMA));
   } catch (e) {
     // 隐私模式等场景忽略
@@ -31,13 +29,12 @@ function getQweatherHost() {
 function getQweatherKey() {
   return localStorage.getItem('qweather_key') || '';
 }
-// 鉴权方式：header（X-QW-Api-Key，默认）或 query（?key=，CORS 不支持自定义头时的回退）
+// 鉴权固定 query（?key=）：旧版可工作路径；header 经 SW 重发要 CORS 预检，易整批 network_error
 function getQweatherAuth() {
-  return localStorage.getItem('qweather_auth') === 'query' ? 'query' : 'header';
+  return 'query';
 }
-function setQweatherAuth(mode) {
-  if (mode === 'query') localStorage.setItem('qweather_auth', 'query');
-  else localStorage.removeItem('qweather_auth');
+function setQweatherAuth() {
+  localStorage.setItem('qweather_auth', 'query');
 }
 function setQweatherHost(host) {
   if (host && host.trim() !== '') {
@@ -201,8 +198,6 @@ let lastUserLoad = 0;
 const USER_LOAD_THROTTLE = 5000;
 let cacheHitThisLoad = false;
 let cacheHitAt = 0;
-// header 鉴权网络/CORS 失败时，本页最多自动回退一次到 query，避免无限重试
-let authFallbackTried = false;
 // 展开态：240h / 10天（优化 #7）
 let hourlyExpanded = false;
 let dailyExpanded = false;
@@ -451,12 +446,10 @@ function renderFooter() {
   }
 }
 
-// ========== 鉴权 URL 构建（优化 #1：header 优先）==========
-// header 模式：key 走 X-QW-Api-Key，URL 不带 key（避免泄漏进日志/缓存键）
-// query 模式：CORS 不允许自定义头时回退 ?key=
+// ========== 鉴权 URL 构建（优化 #1）==========
+// 统一 query 鉴权：key 走 ?key=（与旧版一致）；SW 缓存键仍剥 key，避免换 Key 穿透
 function buildApiUrl(base, path, params = {}) {
-  // 绝不把 new URL 的异常抛给调用方：旧版是字符串拼接不会抛，
-  // 一旦抛错会整批打断 Promise.all，表现为「天气数据加载失败」toast
+  // 绝不把 new URL 的异常抛给调用方：一旦抛错会整批打断 Promise.all
   let u;
   try {
     let href;
@@ -481,15 +474,13 @@ function buildApiUrl(base, path, params = {}) {
   Object.entries(params).forEach(([k, v]) => {
     if (v != null && v !== '') u.searchParams.set(k, String(v));
   });
-  if (getQweatherAuth() === 'query') {
+  if (getQweatherKey()) {
     u.searchParams.set('key', getQweatherKey());
   }
   return u.href;
 }
 function authHeaders() {
-  if (getQweatherAuth() === 'header' && getQweatherKey()) {
-    return { 'X-QW-Api-Key': getQweatherKey() };
-  }
+  // 不再发自定义头：避免 CORS 预检失败
   return {};
 }
 
@@ -499,23 +490,8 @@ async function safeFetchJson(url) {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), FETCH_TIMEOUT);
   try {
-    let target = url;
-    const headers = {};
-    // header 模式下若 URL 仍残留 key（老调用点），迁到 header
-    if (getQweatherAuth() === 'header' && getQweatherKey()) {
-      try {
-        const u = new URL(target, location.href);
-        if (u.searchParams.has('key')) {
-          u.searchParams.delete('key');
-          target = u.href;
-        }
-      } catch (e) { /* 相对 URL 等忽略 */ }
-      Object.assign(headers, authHeaders());
-    }
-    const res = await fetch(target, {
-      signal: controller.signal,
-      headers: Object.keys(headers).length ? headers : undefined
-    });
+    // 统一 query 鉴权，不附带自定义头（避免 CORS 预检）
+    const res = await fetch(url, { signal: controller.signal });
     if (res.headers.get('x-sw-cached') === '1') {
       cacheHitThisLoad = true;
       const at = parseInt(res.headers.get('x-sw-cached-at') || '0', 10);
@@ -540,7 +516,8 @@ async function safeFetchJson(url) {
     }
     return await res.json();
   } catch (e) {
-    return { code: 'network_error', msg: e.name === 'AbortError' ? '请求超时' : e.message };
+    const msg = e && e.name === 'AbortError' ? '请求超时' : ((e && e.message) || '网络错误');
+    return { code: 'network_error', msg };
   } finally {
     clearTimeout(timer);
   }
@@ -552,45 +529,33 @@ async function probeQweather(host, key) {
   if (base && !/^https?:\/\//i.test(base)) base = 'https://' + base.replace(/^\/+/, '');
   if (!base || !key) return { ok: false, code: 'missing', msg: '请填写 Host 与 Key' };
   const probePath = '/geo/v2/city/lookup';
-  const tryFetch = async (mode) => {
-    let u;
-    try {
-      u = new URL(base + probePath);
-      u.searchParams.set('location', '116.41,39.92');
-      u.searchParams.set('lang', 'zh-hans');
-      if (mode === 'query') u.searchParams.set('key', key);
-    } catch (e) {
-      return { ok: false, network: true, msg: 'Host 无效，无法构造探测地址' };
-    }
-    const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), 8000);
-    try {
-      const res = await fetch(u.href, {
-        signal: controller.signal,
-        headers: mode === 'header' ? { 'X-QW-Api-Key': key } : undefined
-      });
-      let body;
-      try { body = await res.json(); } catch { body = {}; }
-      if (res.status === 429) return { ok: false, code: '429', msg: '请求过于频繁' };
-      if (body && body.code && body.code !== '200') {
-        return { ok: false, code: String(body.code), msg: body.msg || 'Key 无效或无权限' };
-      }
-      if (body && body.location && body.location.length) return { ok: true, mode };
-      if (res.ok) return { ok: true, mode };
-      return { ok: false, code: String(res.status), msg: body.msg || `HTTP ${res.status}` };
-    } catch (e) {
-      return { ok: false, network: true, msg: e.name === 'AbortError' ? '探测超时' : '网络或 CORS 失败' };
-    } finally {
-      clearTimeout(timer);
-    }
-  };
-  // 先 header，CORS/网络失败再试 query
-  let r = await tryFetch('header');
-  if (!r.ok && r.network) {
-    r = await tryFetch('query');
+  let u;
+  try {
+    u = new URL(base + probePath);
+    u.searchParams.set('location', '116.41,39.92');
+    u.searchParams.set('lang', 'zh-hans');
+    u.searchParams.set('key', key);
+  } catch (e) {
+    return { ok: false, network: true, msg: 'Host 无效，无法构造探测地址' };
   }
-  if (r.ok) setQweatherAuth(r.mode || 'header');
-  return r;
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 8000);
+  try {
+    const res = await fetch(u.href, { signal: controller.signal });
+    let body;
+    try { body = await res.json(); } catch { body = {}; }
+    if (res.status === 429) return { ok: false, code: '429', msg: '请求过于频繁' };
+    if (body && body.code && body.code !== '200') {
+      return { ok: false, code: String(body.code), msg: body.msg || 'Key 无效或无权限' };
+    }
+    if (body && body.location && body.location.length) return { ok: true, mode: 'query' };
+    if (res.ok) return { ok: true, mode: 'query' };
+    return { ok: false, code: String(res.status), msg: body.msg || `HTTP ${res.status}` };
+  } catch (e) {
+    return { ok: false, network: true, msg: e.name === 'AbortError' ? '探测超时' : '网络或 CORS 失败' };
+  } finally {
+    clearTimeout(timer);
+  }
 }
 
 // ========== 反向地理编码 ==========
@@ -975,15 +940,22 @@ async function loadAllWeather(force) {
 
     if (mySeq !== loadSeq) return;
 
-    // header 模式整批网络失败（典型为 CORS 拒绝自定义头）→ 自动改 query?key= 重试一次
-    const allNetworkError = [nowData, hourlyData, dailyData, warningData, indicesData]
-      .every(d => d && d.code === 'network_error');
-    if (allNetworkError && !authFallbackTried && getQweatherAuth() === 'header' && getQweatherKey()) {
-      authFallbackTried = true;
-      setQweatherAuth('query');
-      showToast('接口请求失败，已自动切换为 query 鉴权重试', { ms: 4000 });
-      await loadAllWeather(force);
-      return;
+    // 核心三接口任一失败 → 给出真实原因（HTTP/业务码），避免只剩笼统「加载失败」
+    const errCode = (d) => {
+      if (!d) return 'empty';
+      if (d.code != null) return String(d.code);
+      if (d.error && d.error.status != null) return String(d.error.status);
+      return 'unknown';
+    };
+    const core = [nowData, hourlyData, dailyData];
+    const coreAllBad = core.every(d => isApiError(d));
+    if (coreAllBad) {
+      const codes = core.map(errCode).join('/');
+      const sampleMsg = (nowData && (nowData.msg || (nowData.error && nowData.error.title))) || '';
+      console.error('核心天气接口失败:', { nowData, hourlyData, dailyData, warningData });
+      const detail = sampleMsg ? `（${codes}：${sampleMsg}）` : `（${codes}）`;
+      showToast(`天气数据加载失败，请检查网络或配置${detail}`, { type: 'error', ms: 6000 });
+      // 仍渲染各块（safeRender），便于分段自诊
     }
 
     // 每个渲染单独兜底：单块数据异常不能整页报「加载失败」
@@ -1025,7 +997,7 @@ async function loadAllWeather(force) {
     if (mySeq !== loadSeq) return;
     console.error('loadAllWeather 失败:', error);
     const detail = error && error.message ? `（${error.message}）` : '';
-    showToast(`天气数据加载失败，请检查网络或配置${detail}`, { type: 'error', ms: 5000 });
+    showToast(`天气数据加载失败，请检查网络或配置${detail}`, { type: 'error', ms: 6000 });
   } finally {
     if (mySeq === loadSeq) {
       hideLoading();
@@ -1516,9 +1488,8 @@ async function saveSettings() {
       }
       setQweatherHost(host);
       setQweatherKey(key);
-      authFallbackTried = false; // 用户重新保存设置后允许再次尝试 header
       if (settingsSuccess) {
-        settingsSuccess.textContent = `✓ 校验通过（${probe.mode === 'query' ? 'query 鉴权' : 'header 鉴权'}）`;
+        settingsSuccess.textContent = '✓ 校验通过（query 鉴权）';
         settingsSuccess.classList.add('show');
       }
       showToast('设置已保存并通过校验', { type: 'success' });
