@@ -2,22 +2,23 @@
 // 动态确定当前应用的子目录，隔离缓存，确保离线访问正常
 
 // ---------- 1. 动态路径与缓存名称 ----------
-// 获取当前 sw.js 所在的目录路径（例如 '/pwa1/'）
+// 获取当前 sw.js 所在的目录路径（例如 '/weather/'）
 const BASE_PATH = self.location.pathname.replace(/[^/]+$/, '');
-// 构建带项目标识的缓存名称，避免多项目冲突
-// 例如 '/pwa1/' -> 'pwa-cache-pwa1-v1'
-const CACHE_NAME = `pwa-cache${BASE_PATH.replace(/\//g, '-')}v8`;
+// 构建带项目标识的缓存名称，避免多项目冲突（每次改应用代码必须递增版本号）
+const CACHE_NAME = `pwa-cache${BASE_PATH.replace(/\//g, '-')}v10`;
 // 当前项目的缓存前缀（含子路径标识），用于清理时只删本项目的旧缓存
 const CACHE_PREFIX = `pwa-cache${BASE_PATH.replace(/\//g, '-')}`;
 
+// 天气 API 缓存 TTL：5 分钟内同城市（同 URL）刷新可复用；超时/换城市/强制刷新走网络
+const API_TTL_MS = 5 * 60 * 1000;
+
 // 预缓存资源列表（全部使用相对于当前 sw.js 的路径）
 const PRECACHE_URLS = [
-  BASE_PATH,                 // 例如 '/pwa1/'
+  BASE_PATH,                 // 例如 '/weather/'
   `${BASE_PATH}index.html`,
   `${BASE_PATH}manifest.json`,
-  // 如果有图标，可以追加，例如：
-  // `${BASE_PATH}favicon.ico`,
-  // `${BASE_PATH}logo192.png`,
+  `${BASE_PATH}styles.css`,
+  `${BASE_PATH}app.js`,
 ];
 
 // 静态资源扩展名（用于判断是否缓存优先）
@@ -43,6 +44,28 @@ function toCacheableResponse(response) {
   return new Response(response.clone().body, {
     status: response.status,
     statusText: response.statusText,
+    headers
+  });
+}
+
+// 从缓存返回时打标记头，并注入 CORS Expose，让页面 JS 能读到 x-sw-cached*
+function markCachedResponse(cached, cachedAt) {
+  const headers = new Headers(cached.headers);
+  headers.set('x-sw-cached', '1');
+  headers.set('x-sw-cached-at', String(cachedAt));
+  // 跨域响应若无 ACAO（缓存条目头丢失场景），补上以通过 CORS 检查
+  if (!headers.get('access-control-allow-origin')) {
+    headers.set('access-control-allow-origin', '*');
+  }
+  const exposed = (headers.get('access-control-expose-headers') || '')
+    .split(',').map(s => s.trim()).filter(Boolean);
+  for (const h of ['x-sw-cached', 'x-sw-cached-at']) {
+    if (!exposed.includes(h)) exposed.push(h);
+  }
+  headers.set('access-control-expose-headers', exposed.join(', '));
+  return new Response(cached.body, {
+    status: cached.status,
+    statusText: cached.statusText,
     headers
   });
 }
@@ -84,12 +107,22 @@ self.addEventListener('activate', (event) => {
 // ---------- 5. 请求拦截 ----------
 self.addEventListener('fetch', (event) => {
   const { request } = event;
+  if (request.method !== 'GET') return;
   const url = new URL(request.url);
 
-  // 只处理同源 GET 请求
-  if (url.origin !== location.origin || request.method !== 'GET') {
-    return;
-  }
+  const isSameOrigin = url.origin === location.origin;
+  const isAllowedCDN = url.hostname === 'cdn.jsdelivr.net';
+  const isWeatherAPI =
+    url.hostname.endsWith('qweatherapi.com') ||
+    url.hostname.endsWith('qweather.com') ||
+    url.hostname === 'api.bigdatacloud.net';
+
+  // 只处理：同源导航/静态、白名单 CDN 静态、天气 API；其余放行走网络
+  const shouldHandle =
+    isNavigateRequest(request) ||
+    (isStaticResource(url) && (isSameOrigin || isAllowedCDN)) ||
+    isWeatherAPI;
+  if (!shouldHandle) return;
 
   // ----- 5.1 导航请求（HTML）：网络优先，失败回退缓存 -----
   if (isNavigateRequest(request)) {
@@ -108,11 +141,9 @@ self.addEventListener('fetch', (event) => {
             console.log('[SW] 离线模式，使用缓存页面:', url.pathname);
             return cachedResponse;
           }
-          // 连缓存都没有，返回自定义离线页（可预置 offline.html）
-          // 如果希望更美观，可以预缓存一个 offline.html 并在这里返回它
           return new Response(
             '<h1>📴 离线状态</h1><p>请检查网络连接后刷新页面。</p>',
-            { status: 503, statusText: 'Offline', headers: { 'Content-Type': 'text/html' } }
+            { status: 503, statusText: 'Offline', headers: { 'Content-Type': 'text/html; charset=utf-8' } }
           );
         })
     );
@@ -120,16 +151,13 @@ self.addEventListener('fetch', (event) => {
   }
 
   // ----- 5.2 静态资源请求：缓存优先，未命中则网络请求并缓存 -----
-  // 允许同源或指定的 CDN 跨域资源
-  const isAllowedCDN = url.hostname === 'cdn.jsdelivr.net';
-  if (isStaticResource(url) && (url.origin === location.origin || isAllowedCDN)) {
+  if (isStaticResource(url) && (isSameOrigin || isAllowedCDN)) {
     event.respondWith(
       caches.match(request).then(cachedResponse => {
         if (cachedResponse) {
           return cachedResponse;
         }
         return fetch(request).then(networkResponse => {
-          // 注意：跨域不透明响应 status 为 0，所以用 !networkResponse.ok 不可靠，直接判断是否存在即可
           if (networkResponse) {
             caches.open(CACHE_NAME).then(cache => cache.put(request, toCacheableResponse(networkResponse)));
           }
@@ -141,65 +169,65 @@ self.addEventListener('fetch', (event) => {
     );
     return;
   }
-  // ----- 5.3 API 请求（和风天气数据） -----
-  const isWeatherAPI = url.hostname.endsWith('qweatherapi.com') || url.hostname.endsWith('qweather.com') || url.hostname === 'api.bigdatacloud.net';
 
-  if (isWeatherAPI) {
-    // 修复 Bug：实时类接口（实况/空气质量/分钟降水/预警）改网络优先（stale-while-revalidate），保证刷新拿到最新值；
-    // 预报类接口（逐小时/逐日/指数）保持缓存优先，降低流量消耗。分钟降水数据约 10 分钟更新，不再缓存 1 小时。
-    const isRealtimeAPI =
-      url.pathname.includes('/v7/weather/now') ||
-      url.pathname.includes('/airquality/') ||
-      url.pathname.includes('/v7/minutely/') ||
-      url.pathname.includes('/v7/warning/now');
+  // ----- 5.3 天气 API：5 分钟同城市缓存，超时/_force 实时 -----
+  // 缓存键 = 剥掉 _force 与 key 后的 URL（含 location/路径经纬度）→ 换城市天然不命中。
+  // key 从缓存键剥离：header 鉴权时不在 URL；query 鉴权时不因换 Key 导致缓存穿透。
+  // 网络请求仍保留原始 URL（含 query key）与原始请求头（含 X-QW-Api-Key）。
+  const isForced = url.searchParams.get('_force') === '1';
 
-    // 手动刷新（index 追加 _force=1）：忽略预报缓存强制走网络；
-    // 同时剥掉 _force 参数作为缓存键，避免缓存条目随每次刷新膨胀
-    const isForced = url.searchParams.get('_force') === '1';
-    const cleanUrl = new URL(url);
-    cleanUrl.searchParams.delete('_force');
-    const cacheKeyRequest = new Request(cleanUrl.toString(), { method: 'GET' });
+  const cacheKeyUrl = new URL(url.href);
+  cacheKeyUrl.searchParams.delete('_force');
+  cacheKeyUrl.searchParams.delete('key');
+  const cacheKeyRequest = new Request(cacheKeyUrl.href, { method: 'GET' });
 
-    event.respondWith(
-      caches.open(CACHE_NAME).then(async (cache) => {
-        const cachedResponse = await cache.match(cacheKeyRequest);
+  const fetchUrl = new URL(url.href);
+  fetchUrl.searchParams.delete('_force');
+  // 透传页面发起的鉴权头（header 模式）与模式等；勿用空 headers 覆盖
+  const networkRequestInit = {
+    method: request.method,
+    headers: request.headers,
+    mode: request.mode,
+    credentials: request.credentials,
+    redirect: request.redirect,
+    integrity: request.integrity,
+    referrer: request.referrer,
+    referrerPolicy: request.referrerPolicy,
+  };
 
-        if (isRealtimeAPI || isForced) {
-          // 网络优先：能联网就取最新并回填缓存；离线/失败才回退缓存
-          return fetch(cacheKeyRequest).then((networkResponse) => {
-            if (networkResponse && networkResponse.status === 200) {
-              cache.put(cacheKeyRequest, toCacheableResponse(networkResponse));
-            }
-            return networkResponse;
-          }).catch(() => {
-            return cachedResponse || new Response('{"code":"offline"}', { status: 503 });
-          });
-        }
+  event.respondWith((async () => {
+    const cache = await caches.open(CACHE_NAME);
+    const cachedResponse = await cache.match(cacheKeyRequest);
+    let cachedAt = 0;
+    if (cachedResponse) {
+      cachedAt = parseInt(cachedResponse.headers.get('x-sw-cached-at') || '0', 10) || 0;
+    }
+    const cacheFresh = cachedResponse && cachedAt > 0 && (Date.now() - cachedAt) < API_TTL_MS;
 
-        // 预报类：缓存优先（带 TTL），后台更新
-        const CACHE_MAX_AGE = 60 * 60 * 1000; // 1 小时
-        const cachedTime = cachedResponse ? parseInt(cachedResponse.headers.get('x-sw-cached-at') || '0', 10) : 0;
-        const cacheFresh = cachedTime > 0 && (Date.now() - cachedTime) < CACHE_MAX_AGE;
+    if (cacheFresh && !isForced) {
+      // 5 分钟内同城市刷新：复用缓存，并打上 x-sw-cached 标记供页面提示
+      return markCachedResponse(cachedResponse, cachedAt);
+    }
 
-        const fetchPromise = fetch(cacheKeyRequest).then((networkResponse) => {
-          if (networkResponse && networkResponse.status === 200) {
-            const stamped = toCacheableResponse(networkResponse);
-            stamped.headers.set('x-sw-cached-at', String(Date.now()));
-            cache.put(cacheKeyRequest, stamped);
-          }
-          return networkResponse;
-        }).catch(() => {
-          // 离线不做处理，返回 undefined 让外层走缓存
-        });
-
-        if (cachedResponse && cacheFresh) {
-          return cachedResponse;
-        }
-        return fetchPromise || cachedResponse || new Response('{"code":"offline"}', { status: 503 });
-      })
-    );
-    return;
-  }
-  // ----- 5.4 其他请求（如 API）默认不缓存，直接走网络 -----
-  // （业务数据通常存储在 IndexedDB 中，不受影响）
+    try {
+      const networkResponse = await fetch(new Request(fetchUrl.href, networkRequestInit));
+      if (networkResponse && networkResponse.status === 200) {
+        const stamped = toCacheableResponse(networkResponse);
+        stamped.headers.set('x-sw-cached-at', String(Date.now()));
+        cache.put(cacheKeyRequest, stamped);
+      }
+      // 实时数据不打缓存标记，页面收到即视为最新
+      return networkResponse;
+    } catch (err) {
+      // 网络失败：回退缓存（哪怕过期），并标记为缓存数据
+      if (cachedResponse) {
+        return markCachedResponse(cachedResponse, cachedAt || Date.now());
+      }
+      return new Response('{"code":"network_error"}', {
+        status: 503,
+        statusText: 'Offline',
+        headers: { 'Content-Type': 'application/json' }
+      });
+    }
+  })());
 });
