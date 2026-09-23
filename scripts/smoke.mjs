@@ -70,7 +70,7 @@ ok(js.includes('/airquality/v1/current'), 'AQI 用 airquality/v1');
 ok(js.includes('lang=zh-hans') || js.includes("lang: 'zh-hans'") || /lang.*zh-hans/.test(js), '带 lang=zh-hans');
 
 console.log('== SW 缓存规则 ==');
-ok(/v10/.test(sw), 'CACHE_NAME 升至 v10');
+ok(/v12/.test(sw), 'CACHE_NAME 升至 v12');
 ok(sw.includes('styles.css') && sw.includes('app.js'), '预缓存 styles.css/app.js');
 ok(sw.includes("searchParams.delete('_force')"), '剥离 _force');
 ok(sw.includes("searchParams.delete('key')"), '缓存键剥离 key');
@@ -84,7 +84,11 @@ ok(js.includes('WIND_COMPASS'), '保留 WIND_COMPASS');
 ok(/iconCode/.test(js), '保留 icon 白名单');
 ok(html.includes('id="keyStatus"'), 'keyStatus 元素存在');
 ok(html.includes('id="settingsOverlay"'), 'settingsOverlay 元素存在');
-ok(agents.includes('v9') === false || agents.includes('v10'), 'AGENTS 已记录 v10（或将人工核对）');
+ok(agents.includes('v12'), 'AGENTS 已记录 v12');
+ok(js.includes('LOCATE_WATCHDOG_MS'), '定位看门狗');
+ok(js.includes('authFallbackTried'), 'header→query 自动回退');
+ok(/getQweatherHost[\s\S]*https:\/\//.test(js), 'Host 自动补全 https://');
+ok(js.includes('safeRender') && js.includes('buildApiUrl'), '加载失败不因单点 throw 整页炸');
 
 console.log('');
 console.log(`结果: ${passed} 通过, ${failed} 失败`);

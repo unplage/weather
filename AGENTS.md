@@ -10,7 +10,10 @@
 ## 运行时配置（最重要的 gocha）
 - 和风天气 API 的 Host 与 Key 由用户在 UI 齿轮设置中自行填写，存于 `localStorage` 的 `qweather_host` / `qweather_key`。
 - **鉴权默认走请求头 `X-QW-Api-Key`**（`qweather_auth` 未设或非 `query` 时）。保存设置时 `probeQweather` 先试 header，网络/CORS 失败再试 `?key=` 并落盘 `qweather_auth=query`。
-- Host 是控制台的专属域名（如 `https://m33wt3jj26.re.qweatherapi.com`），**不是** `devapi.qweather.com`。
+- Host 是控制台的专属域名（如 `https://m33wt3jj26.re.qweatherapi.com`），**不是** `devapi.qweather.com`。`getQweatherHost`/`saveSettings`/`probeQweather` 会自动给漏填 scheme 的 Host 补 `https://`。
+- **定位看门狗**（`LOCATE_WATCHDOG_MS` 15s）：GPS 权限弹窗挂起或回调丢失时强制走 IP→lastCity→手动搜索，避免一直「定位中...」；定位成功后先出天气、`fetchCityName` 异步改名，不阻塞首屏。
+- **header 鉴权整批 `network_error` 时自动回退 query 重试一次**（`authFallbackTried`，保存设置后重置）；`migrateStorage` 对无 `qweather_auth` 的老用户默认 `query`（保持原 `?key=` 行为）。
+- **`buildApiUrl` 必须自吞 `new URL` 异常**（旧版字符串拼接不抛，改 `new URL` 后一旦 Host 异常会整批 `Promise.all` 打进 catch，表现为「天气数据加载失败」）；`fetchAqi` 单路失败返回 `{code:'network_error'}` 勿 reject；渲染走 `safeRender` 单块兜底。
 - `app.js` 中"未配置直接拦截、不再 fallback 到 devapi"是故意行为，不要当 bug 修复。
 - 用户手动搜索过的城市存 `localStorage` 的 `userChoseCity=1` + `lastCity`：刷新后**直接恢复上次城市**，不再自动 GPS；点 📍 定位按钮才重新 GPS（清除该标记）。
 - 其他偏好：`temp_unit`（`f`=华氏）、`theme`（`dark`）、`favorites`/`recents`（JSON 数组）、`schema_version`（当前 `2`，升级结构时递增并写迁移）。
@@ -34,7 +37,7 @@
 - **分钟降水**：仅覆盖中国大陆；`403/404/400` 或空数据且 `outOfChina` 时文案「该地区暂不支持…」，勿当网络错误。
 
 ## 服务工作者（sw.js）
-- `CACHE_NAME` 末尾版本号（当前 `v10`）在**每次修改应用代码时都必须递增**，否则浏览器喂旧缓存。这是最常见的坑。
+- `CACHE_NAME` 末尾版本号（当前 `v12`）在**每次修改应用代码时都必须递增**，否则浏览器喂旧缓存。这是最常见的坑。
 - `BASE_PATH` 动态取自 `self.location.pathname`，适配任意子路径，勿硬编码。
 - 预缓存含 `index.html` / `styles.css` / `app.js` / `manifest.json`。
 - 缓存策略：导航 = 网络优先回退缓存；静态资源 + `cdn.jsdelivr.net` 图标字体 = 缓存优先；**天气 API（qweatherapi.com / qweather.com / api.bigdatacloud.net，跨域）= 统一 5 分钟 TTL**：

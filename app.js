@@ -9,9 +9,9 @@ function migrateStorage() {
   try {
     const v = parseInt(localStorage.getItem(STORAGE_SCHEMA_KEY) || '0', 10);
     if (v >= STORAGE_SCHEMA) return;
-    // v1→v2：老用户的 query 模式 key 保持兼容；无 auth 标记时默认 header
+    // v1→v2：老用户原本走 ?key=，无 auth 标记时默认 query，保持行为不变
     if (!localStorage.getItem('qweather_auth')) {
-      localStorage.setItem('qweather_auth', 'header');
+      localStorage.setItem('qweather_auth', 'query');
     }
     localStorage.setItem(STORAGE_SCHEMA_KEY, String(STORAGE_SCHEMA));
   } catch (e) {
@@ -22,7 +22,11 @@ migrateStorage();
 
 // ========== 存储工具 ==========
 function getQweatherHost() {
-  return localStorage.getItem('qweather_host') || '';
+  const raw = (localStorage.getItem('qweather_host') || '').trim();
+  if (!raw) return '';
+  // Host 必须带 scheme；用户漏填时自动补 https://，避免拼出非法 URL
+  if (!/^https?:\/\//i.test(raw)) return 'https://' + raw.replace(/^\/+/, '');
+  return raw;
 }
 function getQweatherKey() {
   return localStorage.getItem('qweather_key') || '';
@@ -197,6 +201,8 @@ let lastUserLoad = 0;
 const USER_LOAD_THROTTLE = 5000;
 let cacheHitThisLoad = false;
 let cacheHitAt = 0;
+// header 鉴权网络/CORS 失败时，本页最多自动回退一次到 query，避免无限重试
+let authFallbackTried = false;
 // 展开态：240h / 10天（优化 #7）
 let hourlyExpanded = false;
 let dailyExpanded = false;
@@ -449,7 +455,29 @@ function renderFooter() {
 // header 模式：key 走 X-QW-Api-Key，URL 不带 key（避免泄漏进日志/缓存键）
 // query 模式：CORS 不允许自定义头时回退 ?key=
 function buildApiUrl(base, path, params = {}) {
-  const u = new URL(path.startsWith('http') ? path : base.replace(/\/+$/, '') + path);
+  // 绝不把 new URL 的异常抛给调用方：旧版是字符串拼接不会抛，
+  // 一旦抛错会整批打断 Promise.all，表现为「天气数据加载失败」toast
+  let u;
+  try {
+    let href;
+    if (path.startsWith('http')) {
+      href = path;
+    } else {
+      let b = String(base == null ? '' : base).trim().replace(/\/+$/, '');
+      // 'https://'.replace(/\/+$/, '') 会变成 'https:'，补回斜杠避免非法 URL
+      if (b === 'https:' || b === 'http:') b += '//';
+      if (b && !/^https?:\/\//i.test(b)) b = 'https://' + b.replace(/^\/+/, '');
+      href = b + path;
+    }
+    u = new URL(href);
+  } catch (e) {
+    try {
+      u = new URL(path, location.href);
+    } catch (e2) {
+      console.warn('buildApiUrl 双重回退失败:', e, e2);
+      return path;
+    }
+  }
   Object.entries(params).forEach(([k, v]) => {
     if (v != null && v !== '') u.searchParams.set(k, String(v));
   });
@@ -520,14 +548,20 @@ async function safeFetchJson(url) {
 
 // ========== 保存时探测 Key（优化 #11）==========
 async function probeQweather(host, key) {
-  const base = (host || '').replace(/\/+$/, '');
+  let base = (host || '').trim().replace(/\/+$/, '');
+  if (base && !/^https?:\/\//i.test(base)) base = 'https://' + base.replace(/^\/+/, '');
   if (!base || !key) return { ok: false, code: 'missing', msg: '请填写 Host 与 Key' };
   const probePath = '/geo/v2/city/lookup';
   const tryFetch = async (mode) => {
-    const u = new URL(base + probePath);
-    u.searchParams.set('location', '116.41,39.92');
-    u.searchParams.set('lang', 'zh-hans');
-    if (mode === 'query') u.searchParams.set('key', key);
+    let u;
+    try {
+      u = new URL(base + probePath);
+      u.searchParams.set('location', '116.41,39.92');
+      u.searchParams.set('lang', 'zh-hans');
+      if (mode === 'query') u.searchParams.set('key', key);
+    } catch (e) {
+      return { ok: false, network: true, msg: 'Host 无效，无法构造探测地址' };
+    }
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), 8000);
     try {
@@ -726,6 +760,9 @@ function renderCitiesPanel() {
 }
 
 // ========== 定位 ==========
+// 定位看门狗：权限弹窗挂起或个别浏览器不回调 timeout 时，强制走回退链，避免一直「定位中...」
+const LOCATE_WATCHDOG_MS = 15000;
+
 function restoreLastCity() {
   const lastCity = localStorage.getItem('lastCity');
   if (!lastCity) return false;
@@ -753,12 +790,15 @@ async function getIpLocation() {
   if (userChoseCity) return false;
   try {
     const data = await safeFetchJson('https://api.bigdatacloud.net/data/reverse-geocode-client?localityLanguage=zh');
+    if (userChoseCity) return false;
     if (data && data.latitude != null && data.longitude != null) {
       currentLat = data.latitude;
       currentLon = data.longitude;
       currentCityName = data.city || data.locality || data.principalSubdivision || '当前位置';
       cityNameEl.innerText = currentCityName;
-      localStorage.setItem('lastCity', JSON.stringify({ lat: currentLat, lon: currentLon, name: currentCityName }));
+      try {
+        localStorage.setItem('lastCity', JSON.stringify({ lat: currentLat, lon: currentLon, name: currentCityName }));
+      } catch (e) { /* 隐私模式忽略 */ }
       weatherLoaded = true;
       loadAllWeather();
       return true;
@@ -770,65 +810,102 @@ async function getIpLocation() {
 }
 
 function getCurrentPosition() {
+  let settled = false;
+  let watchdogTimer = 0;
+  const clearWatchdog = () => { clearTimeout(watchdogTimer); watchdogTimer = 0; };
+
   const tryFallbacks = (err) => {
+    if (settled) return;
+    settled = true;
+    clearWatchdog();
     console.warn('定位失败:', err);
     if (userChoseCity) return;
+    cityNameEl.innerText = '定位中...';
     getIpLocation().then(ok => {
+      if (userChoseCity) return;
       if (!ok && !fallbackToLastCity()) {
+        cityNameEl.innerText = '📍 无法定位，请手动搜索';
+        weatherLoaded = false;
+      }
+    }).catch(() => {
+      if (userChoseCity) return;
+      if (!fallbackToLastCity()) {
         cityNameEl.innerText = '📍 无法定位，请手动搜索';
         weatherLoaded = false;
       }
     });
   };
 
-  if (navigator.geolocation) {
-    navigator.geolocation.getCurrentPosition(
-      async (pos) => {
-        if (userChoseCity) return;
+  // 总看门狗：权限弹窗一直未处理 / 回调丢失时兜底
+  watchdogTimer = setTimeout(() => {
+    if (!settled) tryFallbacks(new Error('定位看门狗超时'));
+  }, LOCATE_WATCHDOG_MS);
+
+  if (!navigator.geolocation) {
+    tryFallbacks(new Error('geolocation 不支持'));
+    return;
+  }
+
+  navigator.geolocation.getCurrentPosition(
+    (pos) => {
+      if (settled || userChoseCity) return;
+      settled = true;
+      clearWatchdog();
+      try {
         currentLat = pos.coords.latitude;
         currentLon = pos.coords.longitude;
-        const name = await fetchCityName(currentLat, currentLon);
+      } catch (e) {
+        tryFallbacks(e);
+        return;
+      }
+      // 先立刻出结果，反查城市名不阻塞首屏（safeFetchJson 自带超时）
+      currentCityName = '当前位置';
+      cityNameEl.innerText = currentCityName;
+      weatherLoaded = true;
+      loadAllWeather();
+      fetchCityName(currentLat, currentLon).then(name => {
         if (userChoseCity) return;
         if (name) {
           currentCityName = name;
-          localStorage.setItem('lastCity', JSON.stringify({ lat: currentLat, lon: currentLon, name: currentCityName }));
+          cityNameEl.innerText = currentCityName;
+          try {
+            localStorage.setItem('lastCity', JSON.stringify({ lat: currentLat, lon: currentLon, name: currentCityName }));
+          } catch (e) { /* 忽略 */ }
           pushRecent({ lat: currentLat, lon: currentLon, name: currentCityName });
-        } else {
-          currentCityName = '当前位置';
         }
-        cityNameEl.innerText = currentCityName;
-        weatherLoaded = true;
-        loadAllWeather();
-        const firstLat = currentLat, firstLon = currentLon;
-        navigator.geolocation.getCurrentPosition(
-          (pos2) => {
-            if (userChoseCity) return;
-            const dLat = Math.abs(pos2.coords.latitude - firstLat);
-            const dLon = Math.abs(pos2.coords.longitude - firstLon);
-            if (dLat < 0.001 && dLon < 0.001) return;
-            currentLat = pos2.coords.latitude;
-            currentLon = pos2.coords.longitude;
-            loadAllWeather();
-          },
-          () => {},
-          { enableHighAccuracy: true, timeout: 15000, maximumAge: 60000 }
-        );
-      },
-      tryFallbacks,
-      { enableHighAccuracy: false, timeout: 8000, maximumAge: 60000 }
-    );
-  } else {
-    tryFallbacks(new Error('geolocation 不支持'));
-  }
+      }).catch(() => { /* 城市名反查失败不影响天气 */ });
+      const firstLat = currentLat, firstLon = currentLon;
+      navigator.geolocation.getCurrentPosition(
+        (pos2) => {
+          if (userChoseCity) return;
+          const dLat = Math.abs(pos2.coords.latitude - firstLat);
+          const dLon = Math.abs(pos2.coords.longitude - firstLon);
+          if (dLat < 0.001 && dLon < 0.001) return;
+          currentLat = pos2.coords.latitude;
+          currentLon = pos2.coords.longitude;
+          loadAllWeather();
+        },
+        () => {},
+        { enableHighAccuracy: true, timeout: 15000, maximumAge: 60000 }
+      );
+    },
+    tryFallbacks,
+    { enableHighAccuracy: false, timeout: 8000, maximumAge: 60000 }
+  );
 }
 
 // ========== 核心加载 ==========
 async function fetchAqi(base, lat, lon, force) {
-  const forceParam = force ? '_force=1' : '';
-  const c = wgs84ToGcj02(lat, lon);
-  const path = `/airquality/v1/current/${coord2(c.lat)}/${coord2(c.lon)}`;
-  let url = buildApiUrl(base, path, forceParam ? { _force: '1' } : {});
-  return await safeFetchJson(url);
+  try {
+    const c = wgs84ToGcj02(lat, lon);
+    const path = `/airquality/v1/current/${coord2(c.lat)}/${coord2(c.lon)}`;
+    const url = buildApiUrl(base, path, force ? { _force: '1' } : {});
+    return await safeFetchJson(url);
+  } catch (e) {
+    // 单路失败不能 reject 掉整个 Promise.all
+    console.warn('AQI 请求构造失败:', e);
+    return { code: 'network_error', msg: e && e.message };
+  }
 }
 
 async function loadAllWeather(force) {
@@ -867,59 +944,88 @@ async function loadAllWeather(force) {
     hourlyHours = hours;
     dailyDays = days;
 
-    const nowPromise = safeFetchJson(buildApiUrl(base, `/weather/v1/current/${latPath}/${lonPath}`, {
+    // 先全部构 URL（buildApiUrl 已兜底不抛），再发起请求
+    const nowUrl = buildApiUrl(base, `/weather/v1/current/${latPath}/${lonPath}`, {
       lang: 'zh-hans', _force: forceParam || undefined
-    }));
-    const hourlyPromise = safeFetchJson(buildApiUrl(base, `/weather/v1/hourly/${latPath}/${lonPath}`, {
+    });
+    const hourlyUrl = buildApiUrl(base, `/weather/v1/hourly/${latPath}/${lonPath}`, {
       hours, localTime: 'true', lang: 'zh-hans', _force: forceParam || undefined
-    }));
-    const dailyPromise = safeFetchJson(buildApiUrl(base, `/weather/v1/daily/${latPath}/${lonPath}`, {
+    });
+    const dailyUrl = buildApiUrl(base, `/weather/v1/daily/${latPath}/${lonPath}`, {
       days, localTime: 'true', lang: 'zh-hans', _force: forceParam || undefined
-    }));
-    const aqiPromise = fetchAqi(base, currentLat, currentLon, force);
-    const warningPromise = safeFetchJson(buildApiUrl(base, `/weatheralert/v1/current/${latPath}/${lonPath}`, {
+    });
+    const warningUrl = buildApiUrl(base, `/weatheralert/v1/current/${latPath}/${lonPath}`, {
       lang: 'zh-hans', _force: forceParam || undefined
-    }));
-    const indicesPromise = safeFetchJson(buildApiUrl(base, '/v7/indices/1d', {
+    });
+    const indicesUrl = buildApiUrl(base, '/v7/indices/1d', {
       ...commonQuery,
       type: '1,3,5,6,7,8,9,10,13,14,15,16'
-    }));
-    const minutelyPromise = safeFetchJson(buildApiUrl(base, '/v7/minutely/5m', commonQuery));
+    });
+    const minutelyUrl = buildApiUrl(base, '/v7/minutely/5m', commonQuery);
 
     const [nowData, hourlyData, dailyData, aqiData, warningData, indicesData, minutelyData] = await Promise.all([
-      nowPromise, hourlyPromise, dailyPromise, aqiPromise, warningPromise,
-      indicesPromise, minutelyPromise
+      safeFetchJson(nowUrl),
+      safeFetchJson(hourlyUrl),
+      safeFetchJson(dailyUrl),
+      fetchAqi(base, currentLat, currentLon, force),
+      safeFetchJson(warningUrl),
+      safeFetchJson(indicesUrl),
+      safeFetchJson(minutelyUrl)
     ]);
 
     if (mySeq !== loadSeq) return;
 
-    renderCurrentWeather(nowData, dailyData);
-    renderHourly(hourlyData);
-    renderDaily(dailyData);
-    renderAqi(aqiData);
-    renderWarning(warningData);
-    renderIndices(indicesData);
-    renderMinutely(minutelyData, coords);
-    updateAttribution(nowData, hourlyData, dailyData, aqiData, warningData);
+    // header 模式整批网络失败（典型为 CORS 拒绝自定义头）→ 自动改 query?key= 重试一次
+    const allNetworkError = [nowData, hourlyData, dailyData, warningData, indicesData]
+      .every(d => d && d.code === 'network_error');
+    if (allNetworkError && !authFallbackTried && getQweatherAuth() === 'header' && getQweatherKey()) {
+      authFallbackTried = true;
+      setQweatherAuth('query');
+      showToast('接口请求失败，已自动切换为 query 鉴权重试', { ms: 4000 });
+      await loadAllWeather(force);
+      return;
+    }
+
+    // 每个渲染单独兜底：单块数据异常不能整页报「加载失败」
+    const safeRender = (label, fn, ...args) => {
+      try { fn(...args); } catch (e) { console.error(label, e); }
+    };
+    safeRender('renderCurrentWeather', renderCurrentWeather, nowData, dailyData);
+    safeRender('renderHourly', renderHourly, hourlyData);
+    safeRender('renderDaily', renderDaily, dailyData);
+    safeRender('renderAqi', renderAqi, aqiData);
+    safeRender('renderWarning', renderWarning, warningData);
+    safeRender('renderIndices', renderIndices, indicesData);
+    safeRender('renderMinutely', renderMinutely, minutelyData, coords);
+    safeRender('updateAttribution', updateAttribution, nowData, hourlyData, dailyData, aqiData, warningData);
 
     lastRefreshTime = Date.now();
-    const t = new Date();
-    updatedAtEl.textContent = `更新于 ${String(t.getHours()).padStart(2, '0')}:${String(t.getMinutes()).padStart(2, '0')}`;
-    if (cacheHitThisLoad) {
-      cacheBadge.style.display = '';
-      if (cacheHitAt) {
-        const d = new Date(cacheHitAt);
-        cacheBadge.textContent = `缓存 ${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
-      } else {
-        cacheBadge.textContent = '缓存';
+    try {
+      const t = new Date();
+      if (updatedAtEl) {
+        updatedAtEl.textContent = `更新于 ${String(t.getHours()).padStart(2, '0')}:${String(t.getMinutes()).padStart(2, '0')}`;
       }
-    } else {
-      cacheBadge.style.display = 'none';
+      if (cacheBadge) {
+        if (cacheHitThisLoad) {
+          cacheBadge.style.display = '';
+          if (cacheHitAt) {
+            const d = new Date(cacheHitAt);
+            cacheBadge.textContent = `缓存 ${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
+          } else {
+            cacheBadge.textContent = '缓存';
+          }
+        } else {
+          cacheBadge.style.display = 'none';
+        }
+      }
+    } catch (e) {
+      console.warn('更新时间/缓存徽标渲染失败:', e);
     }
   } catch (error) {
     if (mySeq !== loadSeq) return;
-    console.error(error);
-    showToast('天气数据加载失败，请检查网络或配置', { type: 'error' });
+    console.error('loadAllWeather 失败:', error);
+    const detail = error && error.message ? `（${error.message}）` : '';
+    showToast(`天气数据加载失败，请检查网络或配置${detail}`, { type: 'error', ms: 5000 });
   } finally {
     if (mySeq === loadSeq) {
       hideLoading();
@@ -1370,14 +1476,19 @@ function closeSettings() {
 }
 
 async function saveSettings() {
-  const host = apiHostInput.value.trim();
+  let host = apiHostInput.value.trim();
   const key = apiKeyInput.value.trim();
+  // Host 只支持 HTTPS；漏填 scheme 时自动补全而非直接报错
+  if (host && !/^https?:\/\//i.test(host)) {
+    host = 'https://' + host.replace(/^\/+/, '');
+    apiHostInput.value = host;
+  }
   if (host && !/^https:\/\//i.test(host)) {
     if (settingsError) {
-      settingsError.textContent = 'API Host 必须以 https:// 开头（例如 https://m33wt3jj26.re.qweatherapi.com）';
+      settingsError.textContent = 'API Host 必须是 https:// 域名（例如 https://m33wt3jj26.re.qweatherapi.com）';
       settingsError.classList.add('show');
     } else {
-      alert('API Host 必须以 https:// 开头');
+      alert('API Host 必须是 https:// 域名');
     }
     return;
   }
@@ -1405,6 +1516,7 @@ async function saveSettings() {
       }
       setQweatherHost(host);
       setQweatherKey(key);
+      authFallbackTried = false; // 用户重新保存设置后允许再次尝试 header
       if (settingsSuccess) {
         settingsSuccess.textContent = `✓ 校验通过（${probe.mode === 'query' ? 'query 鉴权' : 'header 鉴权'}）`;
         settingsSuccess.classList.add('show');
