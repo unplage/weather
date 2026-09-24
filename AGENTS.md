@@ -17,6 +17,7 @@
 - `app.js` 中"未配置直接拦截、不再 fallback 到 devapi"是故意行为，不要当 bug 修复。
 - 用户手动搜索过的城市存 `localStorage` 的 `userChoseCity=1` + `lastCity`：刷新后**直接恢复上次城市**，不再自动 GPS；点 📍 定位按钮才重新 GPS（清除该标记）。
 - 其他偏好：`temp_unit`（`f`=华氏）、`theme`（`dark`）、`favorites`/`recents`（JSON 数组）、`schema_version`（当前 `3`，升级结构时递增并写迁移）。
+- **严禁 `const` 声明后重新赋值**（历史上 `wgs84ToGcj02` 的 `dLat/dLon`、`renderFooter` 的 `attrList`）：严格模式抛 `Assignment to constant variable.`，若发生在 `safeRender` 之外（如 `apiCoords()`）会整页「天气数据加载失败」。需就地换算/懒创建的用 `let`。
 
 ## API 版本（数据源存活，勿回退到已弃用接口）
 - **天气三接口已迁 v1**（路径参数，**纬度在前**）：
@@ -37,7 +38,7 @@
 - **分钟降水**：仅覆盖中国大陆；`403/404/400` 或空数据且 `outOfChina` 时文案「该地区暂不支持…」，勿当网络错误。
 
 ## 服务工作者（sw.js）
-- `CACHE_NAME` 末尾版本号（当前 `v13`）在**每次修改应用代码时都必须递增**，否则浏览器喂旧缓存。这是最常见的坑。
+- `CACHE_NAME` 末尾版本号（当前 `v14`）在**每次修改应用代码时都必须递增**，否则浏览器喂旧缓存。这是最常见的坑。
 - `BASE_PATH` 动态取自 `self.location.pathname`，适配任意子路径，勿硬编码。
 - 预缓存含 `index.html` / `styles.css` / `app.js` / `manifest.json`，**必须用 `new Request(url, { cache: 'reload' })` 绕过 HTTP 缓存**（GitHub Pages `max-age=600` 会把旧 app.js 塞进新 SW 缓存）。
 - 缓存策略：导航 = 网络优先回退缓存；**同源 JS/CSS = 网络优先**（在线永远吃到新版，防 SW 旧缓存卡死）；`cdn.jsdelivr.net` 图标字体 = 缓存优先；**天气 API（qweatherapi.com / qweather.com / api.bigdatacloud.net，跨域）= 统一 5 分钟 TTL**：

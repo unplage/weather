@@ -237,7 +237,7 @@ const updatedAtEl = document.getElementById('updatedAt');
 const cacheBadge = document.getElementById('cacheBadge');
 const footerEl = document.getElementById('footer');
 const attrToggle = document.getElementById('attrToggle');
-const attrList = document.getElementById('attrList');
+let attrList = document.getElementById('attrList'); // 懒创建，见 renderFooter（不能用 const）
 const cityPickerOverlay = document.getElementById('cityPickerOverlay');
 const cityPickerList = document.getElementById('cityPickerList');
 const cityPickerCancelBtn = document.getElementById('cityPickerCancelBtn');
@@ -316,8 +316,10 @@ function wgs84ToGcj02(lat, lon) {
   if (outOfChina(lat, lon)) return { lat, lon };
   const a = 6378245.0;
   const ee = 0.00669342162296594323;
-  const dLat = transformLat(lon - 105.0, lat - 35.0);
-  const dLon = transformLon(lon - 105.0, lat - 35.0);
+  // 必须用 let：下面会就地换算 dLat/dLon（曾误用 const 导致每次刷新抛
+  // "Assignment to constant variable." → 整页「天气数据加载失败」）
+  let dLat = transformLat(lon - 105.0, lat - 35.0);
+  let dLon = transformLon(lon - 105.0, lat - 35.0);
   const radLat = lat / 180.0 * Math.PI;
   let magic = Math.sin(radLat);
   magic = 1 - ee * magic * magic;
